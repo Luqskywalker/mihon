@@ -21,39 +21,61 @@ class TrackChapter(
     private val delayedTrackingStore: DelayedTrackingStore,
 ) {
 
-    suspend fun await(context: Context, mangaId: Long, chapterNumber: Double, setupJobOnFailure: Boolean = true) {
-        withNonCancellableContext {
-            val tracks = getTracks.await(mangaId)
-            if (tracks.isEmpty()) return@withNonCancellableContext
+    suspend fun await(
+        context: Context,
+        mangaId: Long,
+        chapterNumber: Double,
+        setupJobOnFailure: Boolean = true,
+    ) = withNonCancellableContext {
+        val tracks = getTracks.await(mangaId)
+        if (tracks.isEmpty()) return@withNonCancellableContext
 
-            tracks.mapNotNull { track ->
-                val service = trackerManager.get(track.trackerId)
-                if (service == null || !service.isLoggedIn || chapterNumber <= track.lastChapterRead) {
-                    return@mapNotNull null
-                }
+        tracks
+            .mapNotNull { track -> createUpdateTask(track, chapterNumber, context, setupJobOnFailure) }
+            .awaitAll()
+            .forEach { it.exceptionOrNull()?.let(::logFailure) }
+    }
 
-                async {
-                    runCatching {
-                        try {
-                            val updatedTrack = service.refresh(track.toDbTrack())
-                                .toDomainTrack(idRequired = true)!!
-                                .copy(lastChapterRead = chapterNumber)
-                            service.update(updatedTrack.toDbTrack(), true)
-                            insertTrack.await(updatedTrack)
-                            delayedTrackingStore.remove(track.id)
-                        } catch (e: Exception) {
-                            delayedTrackingStore.add(track.id, chapterNumber)
-                            if (setupJobOnFailure) {
-                                DelayedTrackingUpdateJob.setupTask(context)
-                            }
-                            throw e
-                        }
-                    }
-                }
+    private fun TrackChapter.createUpdateTask(
+        track: tachiyomi.domain.track.model.Track,
+        chapterNumber: Double,
+        context: Context,
+        setupJobOnFailure: Boolean,
+    ) = trackerManager.get(track.trackerId)?.takeIf { service ->
+        service.isLoggedIn && chapterNumber > track.lastChapterRead
+    }?.let { service ->
+        async {
+            runCatching {
+                updateTrackerProgress(service, track, chapterNumber, context, setupJobOnFailure)
             }
-                .awaitAll()
-                .mapNotNull { it.exceptionOrNull() }
-                .forEach { logcat(LogPriority.WARN, it) }
         }
+    }
+
+    private suspend fun TrackChapter.updateTrackerProgress(
+        service: eu.kanade.tachiyomi.data.track.Tracker,
+        track: tachiyomi.domain.track.model.Track,
+        chapterNumber: Double,
+        context: Context,
+        setupJobOnFailure: Boolean,
+    ) {
+        try {
+            val updatedTrack = service.refresh(track.toDbTrack())
+                .toDomainTrack(idRequired = true)!!
+                .copy(lastChapterRead = chapterNumber)
+            
+            service.update(updatedTrack.toDbTrack(), true)
+            insertTrack.await(updatedTrack)
+            delayedTrackingStore.remove(track.id)
+        } catch (e: Exception) {
+            delayedTrackingStore.add(track.id, chapterNumber)
+            if (setupJobOnFailure) {
+                DelayedTrackingUpdateJob.setupTask(context)
+            }
+            throw e
+        }
+    }
+
+    private fun logFailure(error: Throwable) {
+        logcat(LogPriority.WARN, error) { "Failed to track chapter progress" }
     }
 }
