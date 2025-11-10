@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,79 +79,128 @@ fun ExtensionDetailsScreen(
     onClickIncognito: (Boolean) -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
-    val url = remember(state.extension) {
-        val regex = """https://raw.githubusercontent.com/(.+?)/(.+?)/.+""".toRegex()
-        regex.find(state.extension?.repoUrl.orEmpty())
-            ?.let {
-                val (user, repo) = it.destructured
-                "https://github.com/$user/$repo"
-            }
-            ?: state.extension?.repoUrl
+    val repoUrl = remember(state.extension) {
+        state.extension?.repoUrl?.let { extractGitHubUrl(it) } ?: state.extension?.repoUrl
     }
 
     Scaffold(
         topBar = { scrollBehavior ->
-            AppBar(
-                title = stringResource(MR.strings.label_extension_info),
+            ExtensionDetailsAppBar(
+                repoUrl = repoUrl,
                 navigateUp = navigateUp,
-                actions = {
-                    AppBarActions(
-                        actions = persistentListOf<AppBar.AppBarAction>().builder()
-                            .apply {
-                                if (url != null) {
-                                    add(
-                                        AppBar.Action(
-                                            title = stringResource(MR.strings.action_open_repo),
-                                            icon = Icons.AutoMirrored.Outlined.Launch,
-                                            onClick = {
-                                                uriHandler.openUri(url)
-                                            },
-                                        ),
-                                    )
-                                }
-                                addAll(
-                                    listOf(
-                                        AppBar.OverflowAction(
-                                            title = stringResource(MR.strings.action_enable_all),
-                                            onClick = onClickEnableAll,
-                                        ),
-                                        AppBar.OverflowAction(
-                                            title = stringResource(MR.strings.action_disable_all),
-                                            onClick = onClickDisableAll,
-                                        ),
-                                        AppBar.OverflowAction(
-                                            title = stringResource(MR.strings.pref_clear_cookies),
-                                            onClick = onClickClearCookies,
-                                        ),
-                                    ),
-                                )
-                            }
-                            .build(),
-                    )
-                },
+                onEnableAll = onClickEnableAll,
+                onDisableAll = onClickDisableAll,
+                onClearCookies = onClickClearCookies,
                 scrollBehavior = scrollBehavior,
+                uriHandler = uriHandler,
             )
         },
     ) { paddingValues ->
-        if (state.extension == null) {
-            EmptyScreen(
-                MR.strings.empty_screen,
-                modifier = Modifier.padding(paddingValues),
-            )
-            return@Scaffold
-        }
-
-        ExtensionDetails(
+        ExtensionDetailsContent(
+            state = state,
             contentPadding = paddingValues,
-            extension = state.extension,
-            sources = state.sources,
-            incognitoMode = state.isIncognito,
             onClickSourcePreferences = onClickSourcePreferences,
             onClickUninstall = onClickUninstall,
             onClickSource = onClickSource,
             onClickIncognito = onClickIncognito,
         )
     }
+}
+
+@Composable
+private fun ExtensionDetailsAppBar(
+    repoUrl: String?,
+    navigateUp: () -> Unit,
+    onEnableAll: () -> Unit,
+    onDisableAll: () -> Unit,
+    onClearCookies: () -> Unit,
+    scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior,
+    uriHandler: androidx.compose.ui.platform.UriHandler,
+) {
+    AppBar(
+        title = stringResource(MR.strings.label_extension_info),
+        navigateUp = navigateUp,
+        actions = {
+            AppBarActions(
+                actions = buildAppBarActions(
+                    repoUrl = repoUrl,
+                    onOpenRepo = { repoUrl?.let { uriHandler.openUri(it) } },
+                    onEnableAll = onEnableAll,
+                    onDisableAll = onDisableAll,
+                    onClearCookies = onClearCookies,
+                ),
+            )
+        },
+        scrollBehavior = scrollBehavior,
+    )
+}
+
+@Composable
+private fun buildAppBarActions(
+    repoUrl: String?,
+    onOpenRepo: () -> Unit,
+    onEnableAll: () -> Unit,
+    onDisableAll: () -> Unit,
+    onClearCookies: () -> Unit,
+): ImmutableList<AppBar.AppBarAction> = remember(repoUrl) {
+    persistentListOf<AppBar.AppBarAction>().builder()
+        .apply {
+            if (repoUrl != null) {
+                add(
+                    AppBar.Action(
+                        title = stringResource(MR.strings.action_open_repo),
+                        icon = Icons.AutoMirrored.Outlined.Launch,
+                        onClick = onOpenRepo,
+                    ),
+                )
+            }
+            addAll(
+                listOf(
+                    AppBar.OverflowAction(
+                        title = stringResource(MR.strings.action_enable_all),
+                        onClick = onEnableAll,
+                    ),
+                    AppBar.OverflowAction(
+                        title = stringResource(MR.strings.action_disable_all),
+                        onClick = onDisableAll,
+                    ),
+                    AppBar.OverflowAction(
+                        title = stringResource(MR.strings.pref_clear_cookies),
+                        onClick = onClearCookies,
+                    ),
+                ),
+            )
+        }
+        .build()
+}
+
+@Composable
+private fun ExtensionDetailsContent(
+    state: ExtensionDetailsScreenModel.State,
+    contentPadding: PaddingValues,
+    onClickSourcePreferences: (sourceId: Long) -> Unit,
+    onClickUninstall: () -> Unit,
+    onClickSource: (sourceId: Long) -> Unit,
+    onClickIncognito: (Boolean) -> Unit,
+) {
+    if (state.extension == null) {
+        EmptyScreen(
+            stringResource(MR.strings.empty_screen),
+            modifier = Modifier.padding(contentPadding),
+        )
+        return
+    }
+
+    ExtensionDetails(
+        contentPadding = contentPadding,
+        extension = state.extension,
+        sources = state.sources,
+        incognitoMode = state.isIncognito,
+        onClickSourcePreferences = onClickSourcePreferences,
+        onClickUninstall = onClickUninstall,
+        onClickSource = onClickSource,
+        onClickIncognito = onClickIncognito,
+    )
 }
 
 @Composable
@@ -164,8 +214,15 @@ private fun ExtensionDetails(
     onClickSource: (sourceId: Long) -> Unit,
     onClickIncognito: (Boolean) -> Unit,
 ) {
-    val context = LocalContext.current
     var showNsfwWarning by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showNsfwWarning) {
+        // Auto-dismiss NSFW warning after 5 seconds
+        if (showNsfwWarning) {
+            kotlinx.coroutines.delay(5000)
+            showNsfwWarning = false
+        }
+    }
 
     ScrollbarLazyColumn(
         contentPadding = contentPadding,
@@ -181,16 +238,7 @@ private fun ExtensionDetails(
                 extension = extension,
                 extIncognitoMode = incognitoMode,
                 onClickUninstall = onClickUninstall,
-                onClickAppInfo = {
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", extension.pkgName, null)
-                        context.startActivity(this)
-                    }
-                    Unit
-                }.takeIf { extension.isShared },
-                onClickAgeRating = {
-                    showNsfwWarning = true
-                },
+                onClickAgeRating = { showNsfwWarning = true },
                 onExtIncognitoChange = onClickIncognito,
             )
         }
@@ -207,11 +255,10 @@ private fun ExtensionDetails(
             )
         }
     }
+
     if (showNsfwWarning) {
         NsfwWarningDialog(
-            onClickConfirm = {
-                showNsfwWarning = false
-            },
+            onDismiss = { showNsfwWarning = false },
         )
     }
 }
@@ -222,153 +269,164 @@ private fun DetailsHeader(
     extIncognitoMode: Boolean,
     onClickAgeRating: () -> Unit,
     onClickUninstall: () -> Unit,
-    onClickAppInfo: (() -> Unit)?,
     onExtIncognitoChange: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
+    val isShared = extension is Extension.Installed && extension.isShared
 
     Column {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = MaterialTheme.padding.medium)
-                .padding(
-                    top = MaterialTheme.padding.medium,
-                    bottom = MaterialTheme.padding.small,
-                )
-                .clickable {
-                    val extDebugInfo = buildString {
-                        append(
-                            """
-                            Extension name: ${extension.name} (lang: ${extension.lang}; package: ${extension.pkgName})
-                            Extension version: ${extension.versionName} (lib: ${extension.libVersion}; version code: ${extension.versionCode})
-                            NSFW: ${extension.isNsfw}
-                            """.trimIndent(),
-                        )
-
-                        if (extension is Extension.Installed) {
-                            append("\n\n")
-                            append(
-                                """
-                                Update available: ${extension.hasUpdate}
-                                Obsolete: ${extension.isObsolete}
-                                Shared: ${extension.isShared}
-                                Repository: ${extension.repoUrl}
-                                """.trimIndent(),
-                            )
-                        }
-                    }
-                    context.copyToClipboard("Extension Debug information", extDebugInfo)
-                },
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            ExtensionIcon(
-                modifier = Modifier
-                    .size(112.dp),
-                extension = extension,
-                density = DisplayMetrics.DENSITY_XXXHIGH,
-            )
-
-            Text(
-                text = extension.name,
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center,
-            )
-
-            val strippedPkgName = extension.pkgName.substringAfter("eu.kanade.tachiyomi.extension.")
-
-            Text(
-                text = strippedPkgName,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = MaterialTheme.padding.extraLarge,
-                    vertical = MaterialTheme.padding.small,
-                ),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            InfoText(
-                modifier = Modifier.weight(1f),
-                primaryText = extension.versionName,
-                secondaryText = stringResource(MR.strings.ext_info_version),
-            )
-
-            InfoDivider()
-
-            InfoText(
-                modifier = Modifier.weight(if (extension.isNsfw) 1.5f else 1f),
-                primaryText = LocaleHelper.getSourceDisplayName(extension.lang, context),
-                secondaryText = stringResource(MR.strings.ext_info_language),
-            )
-
-            if (extension.isNsfw) {
-                InfoDivider()
-
-                InfoText(
-                    modifier = Modifier.weight(1f),
-                    primaryText = stringResource(MR.strings.ext_nsfw_short),
-                    primaryTextStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Medium,
-                    ),
-                    secondaryText = stringResource(MR.strings.ext_info_age_rating),
-                    onClick = onClickAgeRating,
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .padding(horizontal = MaterialTheme.padding.medium)
-                .padding(top = MaterialTheme.padding.small),
-            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.medium),
-        ) {
-            OutlinedButton(
-                modifier = Modifier.weight(1f),
-                onClick = onClickUninstall,
-            ) {
-                Text(stringResource(MR.strings.ext_uninstall))
-            }
-
-            if (onClickAppInfo != null) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = onClickAppInfo,
-                ) {
-                    Text(
-                        text = stringResource(MR.strings.ext_app_info),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-            }
-        }
-
-        TextPreferenceWidget(
-            modifier = Modifier.padding(horizontal = MaterialTheme.padding.small),
-            title = stringResource(MR.strings.pref_incognito_mode),
-            subtitle = stringResource(MR.strings.pref_incognito_mode_extension_summary),
-            icon = ImageVector.vectorResource(R.drawable.ic_glasses_24dp),
-            widget = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Switch(
-                        checked = extIncognitoMode,
-                        onCheckedChange = onExtIncognitoChange,
-                        modifier = Modifier.padding(start = TrailingWidgetBuffer),
-                    )
-                }
+        ExtensionInfoHeader(
+            extension = extension,
+            onClickAgeRating = onClickAgeRating,
+            onCopyDebugInfo = {
+                context.copyToClipboard("Extension Debug information", buildDebugInfo(extension))
             },
+        )
+
+        ExtensionActionButtons(
+            onUninstall = onClickUninstall,
+            onAppInfo = if (isShared) {
+                {
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", extension.pkgName, null)
+                        context.startActivity(this)
+                    }
+                }
+            } else null,
+        )
+
+        IncognitoModePreference(
+            enabled = extIncognitoMode,
+            onEnabledChange = onExtIncognitoChange,
         )
 
         HorizontalDivider()
     }
+}
+
+@Composable
+private fun ExtensionInfoHeader(
+    extension: Extension,
+    onClickAgeRating: () -> Unit,
+    onCopyDebugInfo: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = MaterialTheme.padding.medium)
+            .padding(
+                top = MaterialTheme.padding.medium,
+                bottom = MaterialTheme.padding.small,
+            )
+            .clickable(onClick = onCopyDebugInfo),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        ExtensionIcon(
+            modifier = Modifier.size(112.dp),
+            extension = extension,
+            density = DisplayMetrics.DENSITY_XXXHIGH,
+        )
+
+        Text(
+            text = extension.name,
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Center,
+        )
+
+        Text(
+            text = extension.pkgName.substringAfter("eu.kanade.tachiyomi.extension."),
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = MaterialTheme.padding.extraLarge,
+                vertical = MaterialTheme.padding.small,
+            ),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        InfoText(
+            modifier = Modifier.weight(1f),
+            primaryText = extension.versionName,
+            secondaryText = stringResource(MR.strings.ext_info_version),
+        )
+
+        InfoDivider()
+
+        InfoText(
+            modifier = Modifier.weight(if (extension.isNsfw) 1.5f else 1f),
+            primaryText = LocaleHelper.getSourceDisplayName(extension.lang, LocalContext.current),
+            secondaryText = stringResource(MR.strings.ext_info_language),
+        )
+
+        if (extension.isNsfw) {
+            InfoDivider()
+
+            InfoText(
+                modifier = Modifier.weight(1f),
+                primaryText = stringResource(MR.strings.ext_nsfw_short),
+                primaryTextStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Medium,
+                ),
+                secondaryText = stringResource(MR.strings.ext_info_age_rating),
+                onClick = onClickAgeRating,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExtensionActionButtons(
+    onUninstall: () -> Unit,
+    onAppInfo: (() -> Unit)?,
+) {
+    Row(
+        modifier = Modifier
+            .padding(horizontal = MaterialTheme.padding.medium)
+            .padding(top = MaterialTheme.padding.small),
+        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.medium),
+    ) {
+        OutlinedButton(
+            modifier = Modifier.weight(1f),
+            onClick = onUninstall,
+        ) {
+            Text(stringResource(MR.strings.ext_uninstall))
+        }
+
+        if (onAppInfo != null) {
+            Button(
+                modifier = Modifier.weight(1f),
+                onClick = onAppInfo,
+            ) {
+                Text(stringResource(MR.strings.ext_app_info))
+            }
+        }
+    }
+}
+
+@Composable
+private fun IncognitoModePreference(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    TextPreferenceWidget(
+        modifier = Modifier.padding(horizontal = MaterialTheme.padding.small),
+        title = stringResource(MR.strings.pref_incognito_mode),
+        subtitle = stringResource(MR.strings.pref_incognito_mode_extension_summary),
+        icon = ImageVector.vectorResource(R.drawable.ic_glasses_24dp),
+        widget = {
+            Switch(
+                checked = enabled,
+                onCheckedChange = onEnabledChange,
+                modifier = Modifier.padding(start = TrailingWidgetBuffer),
+            )
+        },
+    )
 }
 
 @Composable
@@ -420,14 +478,17 @@ private fun SourceSwitchPreference(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-
-    TextPreferenceWidget(
-        modifier = modifier,
-        title = if (source.labelAsName) {
+    val sourceName = remember(source) {
+        if (source.labelAsName) {
             source.source.toString()
         } else {
             LocaleHelper.getSourceDisplayName(source.source.lang, context)
-        },
+        }
+    }
+
+    TextPreferenceWidget(
+        modifier = modifier,
+        title = sourceName,
         widget = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -437,7 +498,6 @@ private fun SourceSwitchPreference(
                         Icon(
                             imageVector = Icons.Outlined.Settings,
                             contentDescription = stringResource(MR.strings.label_settings),
-                            tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
@@ -455,17 +515,47 @@ private fun SourceSwitchPreference(
 
 @Composable
 private fun NsfwWarningDialog(
-    onClickConfirm: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     AlertDialog(
-        text = {
-            Text(text = stringResource(MR.strings.ext_nsfw_warning))
-        },
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(MR.strings.ext_nsfw_warning_title)) },
+        text = { Text(stringResource(MR.strings.ext_nsfw_warning)) },
         confirmButton = {
-            TextButton(onClick = onClickConfirm) {
-                Text(text = stringResource(MR.strings.action_ok))
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(MR.strings.action_ok))
             }
         },
-        onDismissRequest = onClickConfirm,
     )
+}
+
+// Helper functions
+private fun extractGitHubUrl(repoUrl: String): String? {
+    val regex = """https://raw.githubusercontent.com/(.+?)/(.+?)/.+""".toRegex()
+    return regex.find(repoUrl)?.let {
+        val (user, repo) = it.destructured
+        "https://github.com/$user/$repo"
+    }
+}
+
+private fun buildDebugInfo(extension: Extension): String = buildString {
+    append(
+        """
+        Extension name: ${extension.name} (lang: ${extension.lang}; package: ${extension.pkgName})
+        Extension version: ${extension.versionName} (lib: ${extension.libVersion}; version code: ${extension.versionCode})
+        NSFW: ${extension.isNsfw}
+        """.trimIndent(),
+    )
+
+    if (extension is Extension.Installed) {
+        append("\n\n")
+        append(
+            """
+            Update available: ${extension.hasUpdate}
+            Obsolete: ${extension.isObsolete}
+            Shared: ${extension.isShared}
+            Repository: ${extension.repoUrl}
+            """.trimIndent(),
+        )
+    }
 }
