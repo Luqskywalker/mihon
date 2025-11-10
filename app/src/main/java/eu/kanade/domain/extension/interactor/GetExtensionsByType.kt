@@ -6,55 +6,59 @@ import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.extension.model.Extension
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 
 class GetExtensionsByType(
     private val preferences: SourcePreferences,
     private val extensionManager: ExtensionManager,
 ) {
 
-    fun subscribe(): Flow<Extensions> {
-        val showNsfwSources = preferences.showNsfwSource().get()
-
-        return combine(
-            preferences.enabledLanguages().changes(),
-            extensionManager.installedExtensionsFlow,
-            extensionManager.untrustedExtensionsFlow,
-            extensionManager.availableExtensionsFlow,
-        ) { enabledLanguages, _installed, _untrusted, _available ->
-            val (updates, installed) = _installed
-                .filter { (showNsfwSources || !it.isNsfw) }
-                .sortedWith(
-                    compareBy<Extension.Installed> { !it.isObsolete }
-                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name },
-                )
-                .partition { it.hasUpdate }
-
-            val untrusted = _untrusted
-                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
-
-            val available = _available
-                .filter { extension ->
-                    _installed.none { it.pkgName == extension.pkgName } &&
-                        _untrusted.none { it.pkgName == extension.pkgName } &&
-                        (showNsfwSources || !extension.isNsfw)
-                }
-                .flatMap { ext ->
-                    if (ext.sources.isEmpty()) {
-                        return@flatMap if (ext.lang in enabledLanguages) listOf(ext) else emptyList()
-                    }
-                    ext.sources.filter { it.lang in enabledLanguages }
-                        .map {
-                            ext.copy(
-                                name = it.name,
-                                lang = it.lang,
-                                pkgName = "${ext.pkgName}-${it.id}",
-                                sources = listOf(it),
-                            )
-                        }
-                }
-                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
-
-            Extensions(updates, installed, available, untrusted)
-        }
+    fun subscribe(): Flow<Extensions> = combine(
+        preferences.enabledLanguages().changes(),
+        extensionManager.installedExtensionsFlow,
+        extensionManager.untrustedExtensionsFlow,
+        extensionManager.availableExtensionsFlow,
+    ) { enabledLanguages, installed, untrusted, available ->
+        val showNsfw = preferences.showNsfwSource().get()
+        
+        Extensions(
+            updates = installed.filterExtensions(showNsfw).partition { it.hasUpdate }.first,
+            installed = installed.filterExtensions(showNsfw).sortedByTypeAndName(),
+            available = available.filterAvailableExtensions(installed, untrusted, enabledLanguages, showNsfw),
+            untrusted = untrusted.sortedBy { it.name.lowercase() },
+        )
     }
+
+    private fun List<Extension.Installed>.filterExtensions(showNsfw: Boolean) =
+        filter { showNsfw || !it.isNsfw }
+
+    private fun List<Extension.Installed>.sortedByTypeAndName() =
+        sortedWith(compareBy({ !it.isObsolete }, { it.name.lowercase() }))
+
+    private fun List<Extension.Available>.filterAvailableExtensions(
+        installed: List<Extension.Installed>,
+        untrusted: List<Extension.Untrusted>,
+        enabledLanguages: Set<String>,
+        showNsfw: Boolean,
+    ) = filter { available ->
+        available.pkgName !in installed.map { it.pkgName } &&
+            available.pkgName !in untrusted.map { it.pkgName } &&
+            (showNsfw || !available.isNsfw)
+    }.flatMap { it.toLanguageSpecificExtensions(enabledLanguages) }
+     .sortedBy { it.name.lowercase() }
+
+    private fun Extension.Available.toLanguageSpecificExtensions(enabledLanguages: Set<String>): List<Extension.Available> =
+        if (sources.isEmpty()) {
+            if (lang in enabledLanguages) listOf(this) else emptyList()
+        } else {
+            sources.filter { it.lang in enabledLanguages }.map { source ->
+                copy(
+                    name = source.name,
+                    lang = source.lang,
+                    pkgName = "$pkgName-${source.id}",
+                    sources = listOf(source),
+                )
+            }
+        }
+}
 }
