@@ -10,7 +10,6 @@ import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.toChapterUpdate
 import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.domain.track.model.Track
-import kotlin.math.max
 
 class SyncChapterProgressWithTrack(
     private val updateChapter: UpdateChapter,
@@ -23,10 +22,19 @@ class SyncChapterProgressWithTrack(
         remoteTrack: Track,
         tracker: Tracker,
     ) {
-        if (tracker !is EnhancedTracker) {
-            return
-        }
+        if (tracker !is EnhancedTracker) return
 
+        try {
+            val (chapterUpdates, updatedTrack) = calculateUpdates(mangaId, remoteTrack)
+            tracker.update(updatedTrack.toDbTrack())
+            updateChapter.awaitAll(chapterUpdates)
+            insertTrack.await(updatedTrack)
+        } catch (e: Throwable) {
+            logcat(LogPriority.WARN, e) { "Failed to sync chapter progress with tracker" }
+        }
+    }
+
+    private suspend fun calculateUpdates(mangaId: Long, remoteTrack: Track): Pair<List<tachiyomi.domain.chapter.model.ChapterUpdate>, Track> {
         val sortedChapters = getChaptersByMangaId.await(mangaId)
             .sortedBy { it.chapterNumber }
             .filter { it.isRecognizedNumber }
@@ -35,17 +43,10 @@ class SyncChapterProgressWithTrack(
             .filter { chapter -> chapter.chapterNumber <= remoteTrack.lastChapterRead && !chapter.read }
             .map { it.copy(read = true).toChapterUpdate() }
 
-        // only take into account continuous reading
-        val localLastRead = sortedChapters.takeWhile { it.read }.lastOrNull()?.chapterNumber ?: 0F
-        val lastRead = max(remoteTrack.lastChapterRead, localLastRead.toDouble())
+        val localLastRead = sortedChapters.takeWhile { it.read }.lastOrNull()?.chapterNumber ?: 0.0
+        val lastRead = maxOf(remoteTrack.lastChapterRead, localLastRead)
         val updatedTrack = remoteTrack.copy(lastChapterRead = lastRead)
 
-        try {
-            tracker.update(updatedTrack.toDbTrack())
-            updateChapter.awaitAll(chapterUpdates)
-            insertTrack.await(updatedTrack)
-        } catch (e: Throwable) {
-            logcat(LogPriority.WARN, e)
-        }
+        return chapterUpdates to updatedTrack
     }
 }
