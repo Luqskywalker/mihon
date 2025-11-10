@@ -11,7 +11,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Modifier
 import eu.kanade.presentation.category.components.CategoryFloatingActionButton
@@ -39,6 +41,7 @@ fun CategoryScreen(
     navigateUp: () -> Unit,
 ) {
     val lazyListState = rememberLazyListState()
+    
     Scaffold(
         topBar = { scrollBehavior ->
             AppBar(
@@ -54,23 +57,30 @@ fun CategoryScreen(
             )
         },
     ) { paddingValues ->
-        if (state.isEmpty) {
-            EmptyScreen(
-                stringRes = MR.strings.information_empty_category,
-                modifier = Modifier.padding(paddingValues),
+        when {
+            state.isEmpty -> EmptyCategoryScreen(paddingValues)
+            else -> CategoryContent(
+                categories = state.categories,
+                lazyListState = lazyListState,
+                paddingValues = paddingValues,
+                onClickRename = onClickRename,
+                onClickDelete = onClickDelete,
+                onChangeOrder = onChangeOrder,
             )
-            return@Scaffold
         }
-
-        CategoryContent(
-            categories = state.categories,
-            lazyListState = lazyListState,
-            paddingValues = paddingValues,
-            onClickRename = onClickRename,
-            onClickDelete = onClickDelete,
-            onChangeOrder = onChangeOrder,
-        )
     }
+}
+
+@Composable
+private fun EmptyCategoryScreen(
+    paddingValues: PaddingValues,
+) {
+    EmptyScreen(
+        stringRes = MR.strings.information_empty_category,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues),
+    )
 }
 
 @Composable
@@ -82,30 +92,55 @@ private fun CategoryContent(
     onClickDelete: (Category) -> Unit,
     onChangeOrder: (Category, Int) -> Unit,
 ) {
-    val categoriesState = remember { categories.toMutableStateList() }
-    val reorderableState = rememberReorderableLazyListState(lazyListState, paddingValues) { from, to ->
-        val item = categoriesState.removeAt(from.index)
-        categoriesState.add(to.index, item)
-        onChangeOrder(item, to.index)
+    // Use derived state to optimize list updates
+    val categoriesState = remember(categories) {
+        categories.toMutableStateList()
     }
 
+    val reorderableState = rememberReorderableLazyListState(
+        lazyListState = lazyListState,
+        contentPadding = paddingValues,
+        onMove = { from, to ->
+            val item = categoriesState.removeAt(from.index)
+            categoriesState.add(to.index, item)
+            onChangeOrder(item, to.index)
+        }
+    )
+
+    // Only update the state when not dragging and categories actually changed
     LaunchedEffect(categories) {
-        if (!reorderableState.isAnyItemDragging) {
-            categoriesState.clear()
-            categoriesState.addAll(categories)
+        if (!reorderableState.isAnyItemDragging && categories != categoriesState) {
+            categoriesState.updateFrom(categories)
         }
     }
 
+    CategoryList(
+        categories = categoriesState,
+        reorderableState = reorderableState,
+        paddingValues = paddingValues,
+        onClickRename = onClickRename,
+        onClickDelete = onClickDelete,
+    )
+}
+
+@Composable
+private fun CategoryList(
+    categories: SnapshotStateList<Category>,
+    reorderableState: sh.calvin.reorderable.ReorderableLazyListState,
+    paddingValues: PaddingValues,
+    onClickRename: (Category) -> Unit,
+    onClickDelete: (Category) -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        state = lazyListState,
+        state = reorderableState.lazyListState,
         contentPadding = paddingValues +
             topSmallPaddingValues +
             PaddingValues(horizontal = MaterialTheme.padding.medium),
         verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
     ) {
         items(
-            items = categoriesState,
+            items = categories,
             key = { category -> category.key },
         ) { category ->
             ReorderableItem(reorderableState, category.key) {
@@ -120,4 +155,30 @@ private fun CategoryContent(
     }
 }
 
-private val Category.key inline get() = "category-$id"
+/**
+ * Efficiently updates the state list only if the content actually changed.
+ */
+private fun SnapshotStateList<Category>.updateFrom(newCategories: List<Category>) {
+    if (this == newCategories) return
+    
+    // Clear and add all if sizes are different or we can't do a smart update
+    if (size != newCategories.size || !containsAll(newCategories)) {
+        clear()
+        addAll(newCategories)
+        return
+    }
+    
+    // Smart update: only update items that changed
+    for (i in indices) {
+        if (this[i] != newCategories[i]) {
+            this[i] = newCategories[i]
+        }
+    }
+}
+
+private val Category.key: String
+    get() = "category-$id"
+
+// Extension for better performance tracking
+private val List<Category>.key: String
+    get() = joinToString(prefix = "categories-") { it.id.toString() }
