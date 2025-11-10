@@ -28,15 +28,41 @@ class DelayedTrackingStore(context: Context) {
         }
     }
 
-    fun getItems(): List<DelayedTrackingItem> {
-        return preferences.all.mapNotNull {
-            DelayedTrackingItem(
-                trackId = it.key.toLong(),
-                lastChapterRead = it.value.toString().toFloat(),
-            )
+    fun removeAll(trackIds: Collection<Long>) {
+        preferences.edit {
+            trackIds.forEach { remove(it.toString()) }
         }
     }
 
+    fun getItems(): List<DelayedTrackingItem> = preferences.all.mapNotNull { (key, value) ->
+        DelayedTrackingItem(
+            trackId = key.toLongOrNull() ?: return@mapNotNull null,
+            lastChapterRead = (value as? Float) ?: return@mapNotNull null,
+        )
+    }
+
+    fun getItem(trackId: Long): DelayedTrackingItem? = preferences.getFloat(trackId.toString(), -1f)
+        .takeIf { it >= 0 }
+        ?.let { DelayedTrackingItem(trackId, it) }
+
+    fun clear() {
+        preferences.edit { clear() }
+    }
+
+    val isEmpty: Boolean
+        get() = preferences.all.isEmpty()
+
+    val size: Int
+        get() = preferences.all.size
+
+    data class DelayedTrackingItem(
+        val trackId: Long,
+        val lastChapterRead: Float,
+    ) {
+        val isValid: Boolean
+            get() = trackId > 0 && lastChapterRead >= 0
+    }
+}
     data class DelayedTrackingItem(
         val trackId: Long,
         val lastChapterRead: Float,
