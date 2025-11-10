@@ -27,52 +27,9 @@ class AddTracks(
     private val trackerManager: TrackerManager,
 ) {
 
-    // TODO: update all trackers based on common data
     suspend fun bind(tracker: Tracker, item: Track, mangaId: Long) = withNonCancellableContext {
         withIOContext {
-            val allChapters = getChaptersByMangaId.await(mangaId)
-            val hasReadChapters = allChapters.any { it.read }
-            tracker.bind(item, hasReadChapters)
-
-            var track = item.toDomainTrack(idRequired = false) ?: return@withIOContext
-
-            insertTrack.await(track)
-
-            // TODO: merge into [SyncChapterProgressWithTrack]?
-            // Update chapter progress if newer chapters marked read locally
-            if (hasReadChapters) {
-                val latestLocalReadChapterNumber = allChapters
-                    .sortedBy { it.chapterNumber }
-                    .takeWhile { it.read }
-                    .lastOrNull()
-                    ?.chapterNumber ?: -1.0
-
-                if (latestLocalReadChapterNumber > track.lastChapterRead) {
-                    track = track.copy(
-                        lastChapterRead = latestLocalReadChapterNumber,
-                    )
-                    tracker.setRemoteLastChapterRead(track.toDbTrack(), latestLocalReadChapterNumber.toInt())
-                }
-
-                if (track.startDate <= 0) {
-                    val firstReadChapterDate = Injekt.get<GetHistory>().await(mangaId)
-                        .sortedBy { it.readAt }
-                        .firstOrNull()
-                        ?.readAt
-
-                    firstReadChapterDate?.let {
-                        val startDate = firstReadChapterDate.time.convertEpochMillisZone(
-                            ZoneOffset.systemDefault(),
-                            ZoneOffset.UTC,
-                        )
-                        track = track.copy(
-                            startDate = startDate,
-                        )
-                        tracker.setRemoteStartDate(track.toDbTrack(), startDate)
-                    }
-                }
-            }
-
+            val track = performBinding(tracker, item, mangaId)
             syncChapterProgressWithTrack.await(mangaId, track, tracker)
         }
     }
@@ -87,21 +44,77 @@ class AddTracks(
                         service.match(manga)?.let { track ->
                             track.manga_id = manga.id
                             (service as Tracker).bind(track)
-                            insertTrack.await(track.toDomainTrack(idRequired = false)!!)
-
-                            syncChapterProgressWithTrack.await(
-                                manga.id,
-                                track.toDomainTrack(idRequired = false)!!,
-                                service,
-                            )
+                            val domainTrack = track.toDomainTrack(idRequired = false)!!
+                            insertTrack.await(domainTrack)
+                            syncChapterProgressWithTrack.await(manga.id, domainTrack, service)
                         }
                     } catch (e: Exception) {
-                        logcat(
-                            LogPriority.WARN,
-                            e,
-                        ) { "Could not match manga: ${manga.title} with service $service" }
+                        logcat(LogPriority.WARN, e) { 
+                            "Could not match manga: ${manga.title} with service $service" 
+                        }
                     }
                 }
         }
+    }
+
+    private suspend fun performBinding(tracker: Tracker, item: Track, mangaId: Long): tachiyomi.domain.track.model.Track {
+        val allChapters = getChaptersByMangaId.await(mangaId)
+        val hasReadChapters = allChapters.any { it.read }
+        
+        tracker.bind(item, hasReadChapters)
+
+        var track = item.toDomainTrack(idRequired = false) ?: 
+            throw IllegalStateException("Failed to convert track to domain model")
+
+        insertTrack.await(track)
+
+        if (hasReadChapters) {
+            track = updateTrackProgress(track, allChapters, tracker)
+            track = updateTrackStartDate(track, mangaId, tracker)
+        }
+
+        return track
+    }
+
+    private suspend fun updateTrackProgress(
+        track: tachiyomi.domain.track.model.Track,
+        chapters: List<tachiyomi.domain.chapter.model.Chapter>,
+        tracker: Tracker,
+    ): tachiyomi.domain.track.model.Track {
+        val latestLocalReadChapterNumber = chapters
+            .sortedBy { it.chapterNumber }
+            .takeWhile { it.read }
+            .lastOrNull()
+            ?.chapterNumber ?: -1.0
+
+        return if (latestLocalReadChapterNumber > track.lastChapterRead) {
+            val updatedTrack = track.copy(lastChapterRead = latestLocalReadChapterNumber)
+            tracker.setRemoteLastChapterRead(updatedTrack.toDbTrack(), latestLocalReadChapterNumber.toInt())
+            updatedTrack
+        } else {
+            track
+        }
+    }
+
+    private suspend fun updateTrackStartDate(
+        track: tachiyomi.domain.track.model.Track,
+        mangaId: Long,
+        tracker: Tracker,
+    ): tachiyomi.domain.track.model.Track {
+        if (track.startDate > 0) return track
+
+        val firstReadChapterDate = Injekt.get<GetHistory>().await(mangaId)
+            .minByOrNull { it.readAt }
+            ?.readAt
+
+        return firstReadChapterDate?.let { readAt ->
+            val startDate = readAt.time.convertEpochMillisZone(
+                ZoneOffset.systemDefault(),
+                ZoneOffset.UTC,
+            )
+            val updatedTrack = track.copy(startDate = startDate)
+            tracker.setRemoteStartDate(updatedTrack.toDbTrack(), startDate)
+            updatedTrack
+        } ?: track
     }
 }
