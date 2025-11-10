@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -35,7 +36,7 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.source.model.Source
 import tachiyomi.source.local.isLocal
 
-private val defaultModifier = Modifier
+private val defaultSourceIconModifier = Modifier
     .height(40.dp)
     .aspectRatio(1f)
 
@@ -44,39 +45,53 @@ fun SourceIcon(
     source: Source,
     modifier: Modifier = Modifier,
 ) {
-    val icon = source.icon
+    val effectiveModifier = remember(modifier) {
+        modifier.then(defaultSourceIconModifier)
+    }
 
     when {
-        source.isStub && icon == null -> {
-            Image(
-                imageVector = Icons.Filled.Warning,
-                contentDescription = null,
-                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.error),
-                modifier = modifier.then(defaultModifier),
-            )
-        }
-        icon != null -> {
-            Image(
-                bitmap = icon,
-                contentDescription = null,
-                modifier = modifier.then(defaultModifier),
-            )
-        }
-        source.isLocal() -> {
-            Image(
-                painter = painterResource(R.mipmap.ic_local_source),
-                contentDescription = null,
-                modifier = modifier.then(defaultModifier),
-            )
-        }
-        else -> {
-            Image(
-                painter = painterResource(R.mipmap.ic_default_source),
-                contentDescription = null,
-                modifier = modifier.then(defaultModifier),
-            )
-        }
+        source.isStub && source.icon == null -> WarningIcon(effectiveModifier)
+        source.icon != null -> BitmapIcon(source.icon, effectiveModifier)
+        source.isLocal() -> LocalSourceIcon(effectiveModifier)
+        else -> DefaultSourceIcon(effectiveModifier)
     }
+}
+
+@Composable
+private fun WarningIcon(modifier: Modifier) {
+    Image(
+        imageVector = Icons.Filled.Warning,
+        contentDescription = null,
+        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.error),
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun BitmapIcon(bitmap: ImageBitmap, modifier: Modifier) {
+    Image(
+        bitmap = bitmap,
+        contentDescription = null,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun LocalSourceIcon(modifier: Modifier) {
+    Image(
+        painter = painterResource(R.mipmap.ic_local_source),
+        contentDescription = null,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun DefaultSourceIcon(modifier: Modifier) {
+    Image(
+        painter = painterResource(R.mipmap.ic_default_source),
+        contentDescription = null,
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -85,64 +100,100 @@ fun ExtensionIcon(
     modifier: Modifier = Modifier,
     density: Int = DisplayMetrics.DENSITY_DEFAULT,
 ) {
+    val effectiveModifier = remember(modifier) {
+        modifier.then(defaultSourceIconModifier)
+    }
+
     when (extension) {
-        is Extension.Available -> {
-            AsyncImage(
-                model = extension.iconUrl,
-                contentDescription = null,
-                placeholder = ColorPainter(Color(0x1F888888)),
-                error = rememberResourceBitmapPainter(id = R.drawable.cover_error),
-                modifier = modifier
-                    .clip(MaterialTheme.shapes.extraSmall),
-            )
-        }
-        is Extension.Installed -> {
-            val icon by extension.getIcon(density)
-            when (icon) {
-                Result.Loading -> Box(modifier = modifier)
-                is Result.Success -> Image(
-                    bitmap = (icon as Result.Success<ImageBitmap>).value,
-                    contentDescription = null,
-                    modifier = modifier,
-                )
-                Result.Error -> Image(
-                    bitmap = ImageBitmap.imageResource(id = R.mipmap.ic_default_source),
-                    contentDescription = null,
-                    modifier = modifier,
-                )
-            }
-        }
-        is Extension.Untrusted -> Image(
-            imageVector = Icons.Filled.Dangerous,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.error),
-            modifier = modifier.then(defaultModifier),
-        )
+        is Extension.Available -> AvailableExtensionIcon(extension, effectiveModifier)
+        is Extension.Installed -> InstalledExtensionIcon(extension, effectiveModifier, density)
+        is Extension.Untrusted -> UntrustedExtensionIcon(effectiveModifier)
     }
 }
 
 @Composable
-private fun Extension.getIcon(density: Int = DisplayMetrics.DENSITY_DEFAULT): State<Result<ImageBitmap>> {
-    val context = LocalContext.current
-    return produceState<Result<ImageBitmap>>(initialValue = Result.Loading, this) {
-        withIOContext {
-            value = try {
-                val appInfo = ExtensionLoader.getExtensionPackageInfoFromPkgName(context, pkgName)!!.applicationInfo!!
-                val appResources = context.packageManager.getResourcesForApplication(appInfo)
-                Result.Success(
-                    appResources.getDrawableForDensity(appInfo.icon, density, null)!!
-                        .toBitmap()
-                        .asImageBitmap(),
-                )
-            } catch (e: Exception) {
-                Result.Error
-            }
-        }
+private fun AvailableExtensionIcon(
+    extension: Extension.Available,
+    modifier: Modifier,
+) {
+    AsyncImage(
+        model = extension.iconUrl,
+        contentDescription = null,
+        placeholder = remember { ColorPainter(Color(0x1F888888)) },
+        error = rememberResourceBitmapPainter(id = R.drawable.cover_error),
+        modifier = modifier.clip(MaterialTheme.shapes.extraSmall),
+    )
+}
+
+@Composable
+private fun InstalledExtensionIcon(
+    extension: Extension.Installed,
+    modifier: Modifier,
+    density: Int,
+) {
+    val iconState by extension.rememberIconState(density)
+    
+    when (iconState) {
+        is IconResult.Loading -> Box(modifier = modifier)
+        is IconResult.Success -> Image(
+            bitmap = (iconState as IconResult.Success).bitmap,
+            contentDescription = null,
+            modifier = modifier,
+        )
+        is IconResult.Error -> DefaultExtensionIcon(modifier)
     }
 }
 
-sealed class Result<out T> {
-    data object Loading : Result<Nothing>()
-    data object Error : Result<Nothing>()
-    data class Success<out T>(val value: T) : Result<T>()
+@Composable
+private fun UntrustedExtensionIcon(modifier: Modifier) {
+    Image(
+        imageVector = Icons.Filled.Dangerous,
+        contentDescription = null,
+        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.error),
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun DefaultExtensionIcon(modifier: Modifier) {
+    Image(
+        bitmap = ImageBitmap.imageResource(id = R.mipmap.ic_default_source),
+        contentDescription = null,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun Extension.rememberIconState(density: Int): State<IconResult> {
+    val context = LocalContext.current
+    return remember(pkgName, density) {
+        produceState<IconResult>(
+            initialValue = IconResult.Loading,
+            key1 = pkgName,
+            key2 = density,
+            producer = {
+                withIOContext {
+                    value = try {
+                        val appInfo = ExtensionLoader.getExtensionPackageInfoFromPkgName(context, pkgName)
+                            ?.applicationInfo
+                            ?: return@withIOContext IconResult.Error
+                        
+                        val appResources = context.packageManager.getResourcesForApplication(appInfo)
+                        val drawable = appResources.getDrawableForDensity(appInfo.icon, density, null)
+                            ?: return@withIOContext IconResult.Error
+                        
+                        IconResult.Success(drawable.toBitmap().asImageBitmap())
+                    } catch (e: Exception) {
+                        IconResult.Error
+                    }
+                }
+            }
+        )
+    }
+}
+
+sealed class IconResult {
+    data object Loading : IconResult()
+    data object Error : IconResult()
+    data class Success(val bitmap: ImageBitmap) : IconResult()
 }
