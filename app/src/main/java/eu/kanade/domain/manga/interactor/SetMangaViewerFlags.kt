@@ -9,27 +9,19 @@ class SetMangaViewerFlags(
     private val mangaRepository: MangaRepository,
 ) {
 
-    suspend fun awaitSetReadingMode(id: Long, flag: Long) {
+    suspend fun setReadingMode(id: Long, mode: ReadingMode) = setFlag(id, mode.flags, ReadingMode.MASK)
+
+    suspend fun setOrientation(id: Long, orientation: ReaderOrientation) = setFlag(id, orientation.flags, ReaderOrientation.MASK)
+
+    private suspend fun setFlag(id: Long, flag: Long, mask: Long) {
         val manga = mangaRepository.getMangaById(id)
         mangaRepository.update(
             MangaUpdate(
                 id = id,
-                viewerFlags = manga.viewerFlags.setFlag(flag, ReadingMode.MASK.toLong()),
-            ),
+                viewerFlags = manga.viewerFlags.setFlag(flag, mask),
+            )
         )
     }
 
-    suspend fun awaitSetOrientation(id: Long, flag: Long) {
-        val manga = mangaRepository.getMangaById(id)
-        mangaRepository.update(
-            MangaUpdate(
-                id = id,
-                viewerFlags = manga.viewerFlags.setFlag(flag, ReaderOrientation.MASK.toLong()),
-            ),
-        )
-    }
-
-    private fun Long.setFlag(flag: Long, mask: Long): Long {
-        return this and mask.inv() or (flag and mask)
-    }
+    private fun Long.setFlag(flag: Long, mask: Long): Long = (this and mask.inv()) or (flag and mask)
 }
