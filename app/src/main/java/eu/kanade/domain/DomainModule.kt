@@ -99,12 +99,49 @@ import uy.kohesive.injekt.api.InjektModule
 import uy.kohesive.injekt.api.InjektRegistrar
 import uy.kohesive.injekt.api.addFactory
 import uy.kohesive.injekt.api.addSingletonFactory
-import uy.kohesive.injekt.api.get
 
 class DomainModule : InjektModule {
 
     override fun InjektRegistrar.registerInjectables() {
+        // Repository registrations
+        registerRepositories()
+
+        // Category interactors
+        registerCategoryInteractors()
+
+        // Manga interactors
+        registerMangaInteractors()
+
+        // Chapter interactors
+        registerChapterInteractors()
+
+        // Track interactors
+        registerTrackInteractors()
+
+        // Source interactors
+        registerSourceInteractors()
+
+        // Extension interactors
+        registerExtensionInteractors()
+
+        // Other services
+        registerServices()
+    }
+
+    private fun InjektRegistrar.registerRepositories() {
         addSingletonFactory<CategoryRepository> { CategoryRepositoryImpl(get()) }
+        addSingletonFactory<MangaRepository> { MangaRepositoryImpl(get()) }
+        addSingletonFactory<ChapterRepository> { ChapterRepositoryImpl(get()) }
+        addSingletonFactory<HistoryRepository> { HistoryRepositoryImpl(get()) }
+        addSingletonFactory<TrackRepository> { TrackRepositoryImpl(get()) }
+        addSingletonFactory<SourceRepository> { SourceRepositoryImpl(get(), get()) }
+        addSingletonFactory<StubSourceRepository> { StubSourceRepositoryImpl(get()) }
+        addSingletonFactory<UpdatesRepository> { UpdatesRepositoryImpl(get()) }
+        addSingletonFactory<ExtensionRepoRepository> { ExtensionRepoRepositoryImpl(get()) }
+        addSingletonFactory<ReleaseService> { ReleaseServiceImpl(get(), get()) }
+    }
+
+    private fun InjektRegistrar.registerCategoryInteractors() {
         addFactory { GetCategories(get()) }
         addFactory { ResetCategoryFlags(get(), get()) }
         addFactory { SetDisplayMode(get()) }
@@ -114,8 +151,10 @@ class DomainModule : InjektModule {
         addFactory { ReorderCategory(get()) }
         addFactory { UpdateCategory(get()) }
         addFactory { DeleteCategory(get(), get(), get()) }
+        addFactory { SetMangaCategories(get()) }
+    }
 
-        addSingletonFactory<MangaRepository> { MangaRepositoryImpl(get()) }
+    private fun InjektRegistrar.registerMangaInteractors() {
         addFactory { GetDuplicateLibraryManga(get()) }
         addFactory { GetFavorites(get()) }
         addFactory { GetLibraryManga(get()) }
@@ -132,7 +171,6 @@ class DomainModule : InjektModule {
         addFactory { NetworkToLocalManga(get()) }
         addFactory { UpdateManga(get(), get()) }
         addFactory { UpdateMangaNotes(get()) }
-        addFactory { SetMangaCategories(get()) }
         addFactory { GetExcludedScanlators(get()) }
         addFactory { SetExcludedScanlators(get()) }
         addFactory {
@@ -140,21 +178,9 @@ class DomainModule : InjektModule {
                 get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
             )
         }
+    }
 
-        addSingletonFactory<ReleaseService> { ReleaseServiceImpl(get(), get()) }
-        addFactory { GetApplicationRelease(get(), get()) }
-
-        addSingletonFactory<TrackRepository> { TrackRepositoryImpl(get()) }
-        addFactory { TrackChapter(get(), get(), get(), get()) }
-        addFactory { AddTracks(get(), get(), get(), get()) }
-        addFactory { RefreshTracks(get(), get(), get(), get()) }
-        addFactory { DeleteTrack(get()) }
-        addFactory { GetTracksPerManga(get()) }
-        addFactory { GetTracks(get()) }
-        addFactory { InsertTrack(get()) }
-        addFactory { SyncChapterProgressWithTrack(get(), get(), get()) }
-
-        addSingletonFactory<ChapterRepository> { ChapterRepositoryImpl(get()) }
+    private fun InjektRegistrar.registerChapterInteractors() {
         addFactory { GetChapter(get()) }
         addFactory { GetChaptersByMangaId(get()) }
         addFactory { GetChapterByUrlAndMangaId(get()) }
@@ -164,24 +190,20 @@ class DomainModule : InjektModule {
         addFactory { SyncChaptersWithSource(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
         addFactory { GetAvailableScanlators(get()) }
         addFactory { FilterChaptersForDownload(get(), get(), get()) }
+    }
 
-        addSingletonFactory<HistoryRepository> { HistoryRepositoryImpl(get()) }
-        addFactory { GetHistory(get()) }
-        addFactory { UpsertHistory(get()) }
-        addFactory { RemoveHistory(get()) }
-        addFactory { GetTotalReadDuration(get()) }
+    private fun InjektRegistrar.registerTrackInteractors() {
+        addFactory { TrackChapter(get(), get(), get(), get()) }
+        addFactory { AddTracks(get(), get(), get(), get()) }
+        addFactory { RefreshTracks(get(), get(), get(), get()) }
+        addFactory { DeleteTrack(get()) }
+        addFactory { GetTracksPerManga(get()) }
+        addFactory { GetTracks(get()) }
+        addFactory { InsertTrack(get()) }
+        addFactory { SyncChapterProgressWithTrack(get(), get(), get()) }
+    }
 
-        addFactory { DeleteDownload(get(), get()) }
-
-        addFactory { GetExtensionsByType(get(), get()) }
-        addFactory { GetExtensionSources(get()) }
-        addFactory { GetExtensionLanguages(get(), get()) }
-
-        addSingletonFactory<UpdatesRepository> { UpdatesRepositoryImpl(get()) }
-        addFactory { GetUpdates(get()) }
-
-        addSingletonFactory<SourceRepository> { SourceRepositoryImpl(get(), get()) }
-        addSingletonFactory<StubSourceRepository> { StubSourceRepositoryImpl(get()) }
+    private fun InjektRegistrar.registerSourceInteractors() {
         addFactory { GetEnabledSources(get(), get()) }
         addFactory { GetLanguagesWithSources(get(), get()) }
         addFactory { GetRemoteManga(get()) }
@@ -191,9 +213,15 @@ class DomainModule : InjektModule {
         addFactory { ToggleLanguage(get()) }
         addFactory { ToggleSource(get()) }
         addFactory { ToggleSourcePin(get()) }
-        addFactory { TrustExtension(get(), get()) }
+        addFactory { ToggleIncognito(get()) }
+        addFactory { GetIncognitoState(get(), get(), get()) }
+    }
 
-        addSingletonFactory<ExtensionRepoRepository> { ExtensionRepoRepositoryImpl(get()) }
+    private fun InjektRegistrar.registerExtensionInteractors() {
+        addFactory { GetExtensionsByType(get(), get()) }
+        addFactory { GetExtensionSources(get()) }
+        addFactory { GetExtensionLanguages(get(), get()) }
+        addFactory { TrustExtension(get(), get()) }
         addFactory { ExtensionRepoService(get(), get()) }
         addFactory { GetExtensionRepo(get()) }
         addFactory { GetExtensionRepoCount(get()) }
@@ -201,7 +229,15 @@ class DomainModule : InjektModule {
         addFactory { DeleteExtensionRepo(get()) }
         addFactory { ReplaceExtensionRepo(get()) }
         addFactory { UpdateExtensionRepo(get(), get()) }
-        addFactory { ToggleIncognito(get()) }
-        addFactory { GetIncognitoState(get(), get(), get()) }
+    }
+
+    private fun InjektRegistrar.registerServices() {
+        addFactory { GetHistory(get()) }
+        addFactory { UpsertHistory(get()) }
+        addFactory { RemoveHistory(get()) }
+        addFactory { GetTotalReadDuration(get()) }
+        addFactory { DeleteDownload(get(), get()) }
+        addFactory { GetUpdates(get()) }
+        addFactory { GetApplicationRelease(get(), get()) }
     }
 }
