@@ -28,10 +28,7 @@ class SourcePreferences(
 
     fun pinnedSources() = preferenceStore.getStringSet("pinned_catalogues", emptySet())
 
-    fun lastUsedSource() = preferenceStore.getLong(
-        Preference.appStateKey("last_catalogue_source"),
-        -1,
-    )
+    fun lastUsedSource() = preferenceStore.getLong("last_catalogue_source", -1)
 
     fun showNsfwSource() = preferenceStore.getBoolean("show_nsfw_source", true)
 
@@ -48,23 +45,17 @@ class SourcePreferences(
 
     fun extensionUpdatesCount() = preferenceStore.getInt("ext_updates_count", 0)
 
-    fun trustedExtensions() = preferenceStore.getStringSet(
-        Preference.appStateKey("trusted_extensions"),
-        emptySet(),
-    )
+    fun trustedExtensions() = preferenceStore.getStringSet("trusted_extensions", emptySet())
 
-    fun globalSearchFilterState() = preferenceStore.getBoolean(
-        Preference.appStateKey("has_filters_toggle_state"),
-        false,
-    )
+    fun globalSearchFilterState() = preferenceStore.getBoolean("has_filters_toggle_state", false)
 
     fun migrationSources() = preferenceStore.getLongArray("migration_sources", emptyList())
 
     fun migrationFlags() = preferenceStore.getObjectFromInt(
-        key = "migration_flags",
-        defaultValue = MigrationFlag.entries.toSet(),
-        serializer = { MigrationFlag.toBit(it) },
-        deserializer = { value: Int -> MigrationFlag.fromBit(value) },
+        "migration_flags",
+        MigrationFlag.entries.toSet(),
+        MigrationFlag::toBit,
+        MigrationFlag::fromBit,
     )
 
     fun migrationDeepSearchMode() = preferenceStore.getBoolean("migration_deep_search", false)
