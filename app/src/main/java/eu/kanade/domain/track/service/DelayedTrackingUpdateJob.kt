@@ -19,41 +19,53 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.util.concurrent.TimeUnit
 
-class DelayedTrackingUpdateJob(private val context: Context, workerParams: WorkerParameters) :
-    CoroutineWorker(context, workerParams) {
+class DelayedTrackingUpdateJob(
+    private val context: Context,
+    workerParams: WorkerParameters,
+) : CoroutineWorker(context, workerParams) {
 
-    override suspend fun doWork(): Result {
-        if (runAttemptCount > 3) {
-            return Result.failure()
+    private val getTracks: GetTracks by lazy { Injekt.get() }
+    private val trackChapter: TrackChapter by lazy { Injekt.get() }
+    private val delayedTrackingStore: DelayedTrackingStore by lazy { Injekt.get() }
+
+    override suspend fun doWork(): Result = when {
+        runAttemptCount > MAX_RETRY_ATTEMPTS -> Result.failure()
+        else -> processDelayedTrackingUpdates()
+    }
+
+    private suspend fun processDelayedTrackingUpdates(): Result = withIOContext {
+        val items = delayedTrackingStore.getItems()
+        if (items.isEmpty()) return@withIOContext Result.success()
+
+        items.forEach { item ->
+            processTrackingItem(item)
         }
 
-        val getTracks = Injekt.get<GetTracks>()
-        val trackChapter = Injekt.get<TrackChapter>()
+        if (delayedTrackingStore.getItems().isEmpty()) Result.success() else Result.retry()
+    }
 
-        val delayedTrackingStore = Injekt.get<DelayedTrackingStore>()
-
-        withIOContext {
-            delayedTrackingStore.getItems()
-                .mapNotNull {
-                    val track = getTracks.awaitOne(it.trackId)
-                    if (track == null) {
-                        delayedTrackingStore.remove(it.trackId)
-                    }
-                    track?.copy(lastChapterRead = it.lastChapterRead.toDouble())
-                }
-                .forEach { track ->
-                    logcat(LogPriority.DEBUG) {
-                        "Updating delayed track item: ${track.mangaId}, last chapter read: ${track.lastChapterRead}"
-                    }
-                    trackChapter.await(context, track.mangaId, track.lastChapterRead, setupJobOnFailure = false)
-                }
+    private suspend fun processTrackingItem(item: DelayedTrackingStore.DelayedTrackingItem) {
+        val track = getTracks.awaitOne(item.trackId) ?: run {
+            delayedTrackingStore.remove(item.trackId)
+            return
         }
 
-        return if (delayedTrackingStore.getItems().isEmpty()) Result.success() else Result.retry()
+        logcat(LogPriority.DEBUG) {
+            "Updating delayed track: manga=${track.mangaId}, chapter=${item.lastChapterRead}"
+        }
+
+        trackChapter.await(
+            context = context,
+            mangaId = track.mangaId,
+            chapterNumber = item.lastChapterRead.toDouble(),
+            setupJobOnFailure = false,
+        )
     }
 
     companion object {
         private const val TAG = "DelayedTrackingUpdate"
+        private const val MAX_RETRY_ATTEMPTS = 3
+        private const val BACKOFF_DELAY_MINUTES = 5L
 
         fun setupTask(context: Context) {
             val constraints = Constraints(
@@ -62,7 +74,7 @@ class DelayedTrackingUpdateJob(private val context: Context, workerParams: Worke
 
             val request = OneTimeWorkRequestBuilder<DelayedTrackingUpdateJob>()
                 .setConstraints(constraints)
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_DELAY_MINUTES, TimeUnit.MINUTES)
                 .addTag(TAG)
                 .build()
 
