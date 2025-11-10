@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,6 +30,7 @@ import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -51,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.clearFocusOnSoftKeyboardHide
@@ -63,21 +66,15 @@ const val SEARCH_DEBOUNCE_MILLIS = 250L
 @Composable
 fun AppBar(
     title: String?,
-
     modifier: Modifier = Modifier,
     backgroundColor: Color? = null,
-    // Text
     subtitle: String? = null,
-    // Up button
     navigateUp: (() -> Unit)? = null,
     navigationIcon: ImageVector? = null,
-    // Menu
     actions: @Composable RowScope.() -> Unit = {},
-    // Action mode
     actionModeCounter: Int = 0,
     onCancelActionMode: () -> Unit = {},
     actionModeActions: @Composable RowScope.() -> Unit = {},
-
     scrollBehavior: TopAppBarScrollBehavior? = null,
 ) {
     val isActionMode by remember(actionModeCounter) {
@@ -111,25 +108,23 @@ fun AppBar(
 
 @Composable
 fun AppBar(
-    // Title
     titleContent: @Composable () -> Unit,
-
     modifier: Modifier = Modifier,
     backgroundColor: Color? = null,
-    // Up button
     navigateUp: (() -> Unit)? = null,
     navigationIcon: ImageVector? = null,
-    // Menu
     actions: @Composable RowScope.() -> Unit = {},
-    // Action mode
     isActionMode: Boolean = false,
     onCancelActionMode: () -> Unit = {},
-
     scrollBehavior: TopAppBarScrollBehavior? = null,
 ) {
-    Column(
-        modifier = modifier,
-    ) {
+    val containerColor = remember(backgroundColor, isActionMode) {
+        backgroundColor ?: MaterialTheme.colorScheme.surfaceColorAtElevation(
+            elevation = if (isActionMode) 3.dp else 0.dp,
+        )
+    }
+
+    Column(modifier = modifier) {
         TopAppBar(
             navigationIcon = {
                 if (isActionMode) {
@@ -150,9 +145,7 @@ fun AppBar(
             title = titleContent,
             actions = actions,
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = backgroundColor ?: MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    elevation = if (isActionMode) 3.dp else 0.dp,
-                ),
+                containerColor = containerColor,
             ),
             scrollBehavior = scrollBehavior,
         )
@@ -171,6 +164,7 @@ fun AppBarTitle(
                 text = it,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleMedium,
             )
         }
         subtitle?.let {
@@ -182,6 +176,7 @@ fun AppBarTitle(
                 modifier = Modifier.basicMarquee(
                     repeatDelayMillis = 2_000,
                 ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -190,77 +185,102 @@ fun AppBarTitle(
 @Composable
 fun AppBarActions(
     actions: ImmutableList<AppBar.AppBarAction>,
+    modifier: Modifier = Modifier,
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    actions.filterIsInstance<AppBar.Action>().map {
-        TooltipBox(
-            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-            tooltip = {
-                PlainTooltip {
-                    Text(it.title)
-                }
-            },
-            state = rememberTooltipState(),
-            focusable = false,
-        ) {
-            IconButton(
-                onClick = it.onClick,
-                enabled = it.enabled,
+    // Separate regular actions from overflow actions
+    val (regularActions, overflowActions) = remember(actions) {
+        actions.partition { it is AppBar.Action }
+    }
+
+    // Render regular actions with tooltips
+    regularActions.forEach { action ->
+        (action as? AppBar.Action)?.let { appBarAction ->
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                tooltip = { PlainTooltip { Text(appBarAction.title) } },
+                state = rememberTooltipState(),
+                focusable = false,
             ) {
-                Icon(
-                    imageVector = it.icon,
-                    tint = it.iconTint ?: LocalContentColor.current,
-                    contentDescription = it.title,
-                )
+                IconButton(
+                    onClick = appBarAction.onClick,
+                    enabled = appBarAction.enabled,
+                    modifier = modifier,
+                ) {
+                    Icon(
+                        imageVector = appBarAction.icon,
+                        tint = appBarAction.iconTint ?: LocalContentColor.current,
+                        contentDescription = appBarAction.title,
+                    )
+                }
             }
         }
     }
 
-    val overflowActions = actions.filterIsInstance<AppBar.OverflowAction>()
+    // Render overflow menu if there are overflow actions
     if (overflowActions.isNotEmpty()) {
-        TooltipBox(
-            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-            tooltip = {
-                PlainTooltip {
-                    Text(stringResource(MR.strings.action_menu_overflow_description))
-                }
-            },
-            state = rememberTooltipState(),
-            focusable = false,
-        ) {
-            IconButton(
-                onClick = { showMenu = !showMenu },
-            ) {
-                Icon(
-                    Icons.Outlined.MoreVert,
-                    contentDescription = stringResource(MR.strings.action_menu_overflow_description),
-                )
-            }
-        }
+        OverflowMenu(
+            actions = overflowActions,
+            showMenu = showMenu,
+            onShowMenuChange = { showMenu = it },
+            modifier = modifier,
+        )
+    }
+}
 
-        DropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false },
+@Composable
+private fun OverflowMenu(
+    actions: List<AppBar.AppBarAction>,
+    showMenu: Boolean,
+    onShowMenuChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = {
+            PlainTooltip {
+                Text(stringResource(MR.strings.action_menu_overflow_description))
+            }
+        },
+        state = rememberTooltipState(),
+        focusable = false,
+    ) {
+        IconButton(
+            onClick = { onShowMenuChange(!showMenu) },
+            modifier = modifier,
         ) {
-            overflowActions.map {
+            Icon(
+                Icons.Outlined.MoreVert,
+                contentDescription = stringResource(MR.strings.action_menu_overflow_description),
+            )
+        }
+    }
+
+    DropdownMenu(
+        expanded = showMenu,
+        onDismissRequest = { onShowMenuChange(false) },
+    ) {
+        actions.forEach { action ->
+            (action as? AppBar.OverflowAction)?.let { overflowAction ->
                 DropdownMenuItem(
                     onClick = {
-                        it.onClick()
-                        showMenu = false
+                        overflowAction.onClick()
+                        onShowMenuChange(false)
                     },
-                    text = { Text(it.title, fontWeight = FontWeight.Normal) },
+                    text = { 
+                        Text(
+                            overflowAction.title, 
+                            fontWeight = FontWeight.Normal,
+                            style = MaterialTheme.typography.bodyMedium,
+                        ) 
+                    },
                 )
             }
         }
     }
 }
 
-/**
- * @param searchEnabled Set to false if you don't want to show search action.
- * @param searchQuery If null, use normal toolbar.
- * @param placeholderText If null, [MR.strings.action_search_hint] is used.
- */
 @Composable
 fun SearchToolbar(
     searchQuery: String?,
@@ -278,122 +298,42 @@ fun SearchToolbar(
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 ) {
     val focusRequester = remember { FocusRequester() }
+    val isSearchActive = searchQuery != null
+
+    // Auto-focus when search becomes active
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) {
+            focusRequester.requestFocus()
+        }
+    }
 
     AppBar(
         modifier = modifier,
         titleContent = {
-            if (searchQuery == null) return@AppBar titleContent()
-
-            val keyboardController = LocalSoftwareKeyboardController.current
-            val focusManager = LocalFocusManager.current
-
-            val searchAndClearFocus: () -> Unit = f@{
-                if (searchQuery.isBlank()) return@f
-                onSearch(searchQuery)
-                focusManager.clearFocus()
-                keyboardController?.hide()
-                focusManager.moveFocus(FocusDirection.Next)
+            if (!isSearchActive) {
+                titleContent()
+            } else {
+                SearchTextField(
+                    searchQuery = searchQuery ?: "",
+                    onChangeSearchQuery = onChangeSearchQuery,
+                    onSearch = onSearch,
+                    focusRequester = focusRequester,
+                    placeholderText = placeholderText,
+                    visualTransformation = visualTransformation,
+                    interactionSource = interactionSource,
+                )
             }
-
-            BasicTextField(
-                value = searchQuery,
-                onValueChange = onChangeSearchQuery,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester)
-                    .runOnEnterKeyPressed(action = searchAndClearFocus)
-                    .showSoftKeyboard(remember { searchQuery.isEmpty() })
-                    .clearFocusOnSoftKeyboardHide(),
-                textStyle = MaterialTheme.typography.titleMedium.copy(
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 18.sp,
-                ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { searchAndClearFocus() }),
-                singleLine = true,
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
-                visualTransformation = visualTransformation,
-                interactionSource = interactionSource,
-                decorationBox = { innerTextField ->
-                    TextFieldDefaults.DecorationBox(
-                        value = searchQuery,
-                        innerTextField = innerTextField,
-                        enabled = true,
-                        singleLine = true,
-                        visualTransformation = visualTransformation,
-                        interactionSource = interactionSource,
-                        placeholder = {
-                            Text(
-                                modifier = Modifier.secondaryItemAlpha(),
-                                text = (placeholderText ?: stringResource(MR.strings.action_search_hint)),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Normal,
-                                ),
-                            )
-                        },
-                        container = {},
-                    )
-                },
-            )
         },
-        navigateUp = if (searchQuery == null) navigateUp else onClickCloseSearch,
+        navigateUp = if (!isSearchActive) navigateUp else onClickCloseSearch,
         actions = {
-            key("search") {
-                val onClick = { onChangeSearchQuery("") }
-
-                if (!searchEnabled) {
-                    // Don't show search action
-                } else if (searchQuery == null) {
-                    TooltipBox(
-                        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                        tooltip = {
-                            PlainTooltip {
-                                Text(stringResource(MR.strings.action_search))
-                            }
-                        },
-                        state = rememberTooltipState(),
-                        focusable = false,
-                    ) {
-                        IconButton(
-                            onClick = onClick,
-                        ) {
-                            Icon(
-                                Icons.Outlined.Search,
-                                contentDescription = stringResource(MR.strings.action_search),
-                            )
-                        }
-                    }
-                } else if (searchQuery.isNotEmpty()) {
-                    TooltipBox(
-                        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                        tooltip = {
-                            PlainTooltip {
-                                Text(stringResource(MR.strings.action_reset))
-                            }
-                        },
-                        state = rememberTooltipState(),
-                        focusable = false,
-                    ) {
-                        IconButton(
-                            onClick = {
-                                onClick()
-                                focusRequester.requestFocus()
-                            },
-                        ) {
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = stringResource(MR.strings.action_reset),
-                            )
-                        }
-                    }
-                }
-            }
-
-            key("actions") { actions() }
+            SearchActions(
+                searchEnabled = searchEnabled,
+                isSearchActive = isSearchActive,
+                searchQuery = searchQuery,
+                onChangeSearchQuery = onChangeSearchQuery,
+                focusRequester = focusRequester,
+            )
+            key("custom-actions") { actions() }
         },
         isActionMode = false,
         scrollBehavior = scrollBehavior,
@@ -401,12 +341,130 @@ fun SearchToolbar(
 }
 
 @Composable
+private fun SearchTextField(
+    searchQuery: String,
+    onChangeSearchQuery: (String?) -> Unit,
+    onSearch: (String) -> Unit,
+    focusRequester: FocusRequester,
+    placeholderText: String?,
+    visualTransformation: VisualTransformation,
+    interactionSource: MutableInteractionSource,
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+
+    val searchAndClearFocus: () -> Unit = {
+        if (searchQuery.isNotBlank()) {
+            onSearch(searchQuery)
+        }
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    BasicTextField(
+        value = searchQuery,
+        onValueChange = onChangeSearchQuery,
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusRequester(focusRequester)
+            .runOnEnterKeyPressed(action = searchAndClearFocus)
+            .showSoftKeyboard(remember { searchQuery.isEmpty() })
+            .clearFocusOnSoftKeyboardHide(),
+        textStyle = MaterialTheme.typography.titleMedium.copy(
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Normal,
+            fontSize = 18.sp,
+        ),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { searchAndClearFocus() }),
+        singleLine = true,
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        visualTransformation = visualTransformation,
+        interactionSource = interactionSource,
+        decorationBox = { innerTextField ->
+            TextFieldDefaults.DecorationBox(
+                value = searchQuery,
+                innerTextField = innerTextField,
+                enabled = true,
+                singleLine = true,
+                visualTransformation = visualTransformation,
+                interactionSource = interactionSource,
+                placeholder = {
+                    Text(
+                        modifier = Modifier.secondaryItemAlpha(),
+                        text = placeholderText ?: stringResource(MR.strings.action_search_hint),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Normal,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                container = {},
+            )
+        },
+    )
+}
+
+@Composable
+private fun SearchActions(
+    searchEnabled: Boolean,
+    isSearchActive: Boolean,
+    searchQuery: String?,
+    onChangeSearchQuery: (String?) -> Unit,
+    focusRequester: FocusRequester,
+) {
+    if (!searchEnabled) return
+
+    key("search-actions") {
+        when {
+            !isSearchActive -> {
+                SearchActionButton(
+                    title = stringResource(MR.strings.action_search),
+                    icon = Icons.Outlined.Search,
+                    onClick = { onChangeSearchQuery("") }
+                )
+            }
+            !searchQuery.isNullOrEmpty() -> {
+                SearchActionButton(
+                    title = stringResource(MR.strings.action_reset),
+                    icon = Icons.Outlined.Close,
+                    onClick = {
+                        onChangeSearchQuery("")
+                        focusRequester.requestFocus()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchActionButton(
+    title: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(title) } },
+        state = rememberTooltipState(),
+        focusable = false,
+    ) {
+        IconButton(onClick = onClick) {
+            Icon(icon, contentDescription = title)
+        }
+    }
+}
+
+@Composable
 fun UpIcon(
     modifier: Modifier = Modifier,
     navigationIcon: ImageVector? = null,
 ) {
-    val icon = navigationIcon
-        ?: Icons.AutoMirrored.Outlined.ArrowBack
+    val icon = navigationIcon ?: Icons.AutoMirrored.Outlined.ArrowBack
     Icon(
         imageVector = icon,
         contentDescription = stringResource(MR.strings.action_bar_up_description),
