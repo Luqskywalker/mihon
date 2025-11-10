@@ -1,45 +1,41 @@
-package eu.kanade.presentation.components
-
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
-import eu.kanade.domain.ui.UiPreferences
-import eu.kanade.tachiyomi.util.lang.toRelativeString
-import tachiyomi.i18n.MR
-import tachiyomi.presentation.core.i18n.stringResource
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-
+// Basic usage
 @Composable
-fun relativeDateText(
-    dateEpochMillis: Long,
-): String {
-    return relativeDateText(
-        localDate = LocalDate.ofInstant(
-            Instant.ofEpochMilli(dateEpochMillis),
-            ZoneId.systemDefault(),
-        )
-            .takeIf { dateEpochMillis > 0L },
+fun MangaItem(manga: Manga) {
+    Text(
+        text = relativeDateText(manga.lastUpdate),
+        style = MaterialTheme.typography.bodyMedium
     )
 }
 
+// For lists - more efficient
 @Composable
-fun relativeDateText(
-    localDate: LocalDate?,
-): String {
-    val context = LocalContext.current
+fun MangaList(mangas: List<Manga>) {
+    val dateFormatter = rememberDateFormatter()
+    
+    LazyColumn {
+        items(mangas) { manga ->
+            Text(
+                text = dateFormatter(manga.lastUpdate),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
 
-    val preferences = remember { Injekt.get<UiPreferences>() }
-    val relativeTime = remember { preferences.relativeTime().get() }
-    val dateFormat = remember { UiPreferences.dateFormat(preferences.dateFormat().get()) }
-
-    return localDate?.toRelativeString(
-        context = context,
-        relative = relativeTime,
-        dateFormat = dateFormat,
+// Using time ago for recent items
+@Composable
+fun RecentUpdateItem(manga: Manga) {
+    Text(
+        text = relativeTimeAgoText(manga.lastUpdate),
+        style = MaterialTheme.typography.bodySmall
     )
-        ?: stringResource(MR.strings.not_applicable)
+}
+
+// Custom formatting
+@Composable
+fun DetailedDateItem(manga: Manga) {
+    Text(
+        text = formattedDateText(manga.lastUpdate, "EEE, MMM d, yyyy"),
+        style = MaterialTheme.typography.bodySmall
+    )
 }
