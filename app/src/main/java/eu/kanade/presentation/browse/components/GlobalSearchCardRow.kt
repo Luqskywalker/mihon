@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.library.components.CommonMangaItemDefaults
@@ -39,14 +40,15 @@ fun GlobalSearchCardRow(
         contentPadding = PaddingValues(MaterialTheme.padding.small),
         horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
     ) {
-        items(titles) {
-            val title by getManga(it)
+        items(
+            items = titles,
+            key = { manga -> manga.id } // Stable keys for better performance
+        ) { manga ->
+            val titleState by getManga(manga)
             MangaItem(
-                title = title.title,
-                cover = title.asMangaCover(),
-                isFavorite = title.favorite,
-                onClick = { onClick(title) },
-                onLongClick = { onLongClick(title) },
+                manga = titleState,
+                onClick = { onClick(titleState) },
+                onLongClick = { onLongClick(titleState) },
             )
         }
     }
@@ -54,21 +56,28 @@ fun GlobalSearchCardRow(
 
 @Composable
 private fun MangaItem(
-    title: String,
-    cover: MangaCover,
-    isFavorite: Boolean,
+    manga: Manga,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    // Memoize the cover to prevent recreation on every recomposition
+    val cover = remember(manga) { manga.asMangaCover() }
+    
+    // Memoize the cover alpha calculation
+    val coverAlpha = remember(manga.favorite) {
+        if (manga.favorite) CommonMangaItemDefaults.BrowseFavoriteCoverAlpha else 1f
+    }
+
     Box(modifier = Modifier.width(96.dp)) {
         MangaComfortableGridItem(
-            title = title,
+            title = manga.title,
             titleMaxLines = 3,
             coverData = cover,
             coverBadgeStart = {
-                InLibraryBadge(enabled = isFavorite)
+                // Use optimized badge component
+                InLibraryBadgeOptimized(enabled = manga.favorite)
             },
-            coverAlpha = if (isFavorite) CommonMangaItemDefaults.BrowseFavoriteCoverAlpha else 1f,
+            coverAlpha = coverAlpha,
             onClick = onClick,
             onLongClick = onLongClick,
         )
@@ -84,5 +93,68 @@ private fun EmptyResultItem() {
                 horizontal = MaterialTheme.padding.medium,
                 vertical = MaterialTheme.padding.small,
             ),
+        style = MaterialTheme.typography.bodyMedium,
     )
+}
+
+// Alternative optimized version for better performance
+@Composable
+fun GlobalSearchCardRowOptimized(
+    titles: List<Manga>,
+    getManga: @Composable (Manga) -> State<Manga>,
+    onClick: (Manga) -> Unit,
+    onLongClick: (Manga) -> Unit,
+) {
+    when {
+        titles.isEmpty() -> EmptyResultItem()
+        else -> {
+            LazyRow(
+                contentPadding = PaddingValues(MaterialTheme.padding.small),
+                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
+            ) {
+                items(
+                    items = titles,
+                    key = { manga -> manga.id }
+                ) { manga ->
+                    val titleState by getManga(manga)
+                    OptimizedMangaItem(
+                        manga = titleState,
+                        onClick = onClick,
+                        onLongClick = onLongClick,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OptimizedMangaItem(
+    manga: Manga,
+    onClick: (Manga) -> Unit,
+    onLongClick: (Manga) -> Unit,
+) {
+    // Extract only necessary properties to minimize recomposition scope
+    val mangaId = manga.id
+    val title = manga.title
+    val isFavorite = manga.favorite
+    
+    val cover = remember(mangaId) { manga.asMangaCover() }
+    val coverAlpha = remember(isFavorite) {
+        if (isFavorite) CommonMangaItemDefaults.BrowseFavoriteCoverAlpha else 1f
+    }
+
+    Box(modifier = Modifier.width(96.dp)) {
+        MangaComfortableGridItem(
+            title = title,
+            titleMaxLines = 3,
+            coverData = cover,
+            coverBadgeStart = {
+                InLibraryBadgeStable(enabled = isFavorite)
+            },
+            coverAlpha = coverAlpha,
+            onClick = { onClick(manga) },
+            onLongClick = { onLongClick(manga) },
+        )
+    }
 }
