@@ -12,96 +12,81 @@ import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.File
 
-// TODO: move these into the domain model
-val Manga.readingMode: Long
-    get() = viewerFlags and ReadingMode.MASK.toLong()
+// Constants for better maintainability
+private const val CHAPTER_SHOW_DOWNLOADED = 1
+private const val CHAPTER_SHOW_NOT_DOWNLOADED = 2
 
-val Manga.readerOrientation: Long
-    get() = viewerFlags and ReaderOrientation.MASK.toLong()
+// Cache for expensive operations
+private val coverCache: CoverCache by lazy { Injekt.get() }
+private val basePreferences: BasePreferences by lazy { Injekt.get() }
+
+// Extension properties for Manga
+val Manga.readingMode: Long get() = viewerFlags and ReadingMode.MASK.toLong()
+val Manga.readerOrientation: Long get() = viewerFlags and ReaderOrientation.MASK.toLong()
 
 val Manga.downloadedFilter: TriState
-    get() {
-        if (Injekt.get<BasePreferences>().downloadedOnly().get()) return TriState.ENABLED_IS
-        return when (downloadedFilterRaw) {
-            Manga.CHAPTER_SHOW_DOWNLOADED -> TriState.ENABLED_IS
-            Manga.CHAPTER_SHOW_NOT_DOWNLOADED -> TriState.ENABLED_NOT
-            else -> TriState.DISABLED
-        }
+    get() = when {
+        basePreferences.downloadedOnly().get() -> TriState.ENABLED_IS
+        downloadedFilterRaw == CHAPTER_SHOW_DOWNLOADED -> TriState.ENABLED_IS
+        downloadedFilterRaw == CHAPTER_SHOW_NOT_DOWNLOADED -> TriState.ENABLED_NOT
+        else -> TriState.DISABLED
     }
-fun Manga.chaptersFiltered(): Boolean {
-    return unreadFilter != TriState.DISABLED ||
+
+val Manga.hasActiveFilters: Boolean
+    get() = unreadFilter != TriState.DISABLED ||
         downloadedFilter != TriState.DISABLED ||
         bookmarkedFilter != TriState.DISABLED
+
+val Manga.hasCustomCover: Boolean
+    get() = coverCache.getCustomCoverFile(id).exists()
+
+// Conversion functions
+fun Manga.toSManga(): SManga = SManga.create().apply {
+    url = this@toSManga.url
+    title = this@toSManga.title
+    artist = this@toSManga.artist
+    author = this@toSManga.author
+    description = this@toSManga.description
+    genre = this@toSManga.genre?.joinToString().orEmpty()
+    status = this@toSManga.status.toInt()
+    thumbnail_url = this@toSManga.thumbnailUrl
+    initialized = this@toSManga.initialized
 }
 
-fun Manga.toSManga(): SManga = SManga.create().also {
-    it.url = url
-    it.title = title
-    it.artist = artist
-    it.author = author
-    it.description = description
-    it.genre = genre.orEmpty().joinToString()
-    it.status = status.toInt()
-    it.thumbnail_url = thumbnailUrl
-    it.initialized = initialized
-}
+fun Manga.updateFrom(other: SManga): Manga = copy(
+    author = other.author ?: author,
+    artist = other.artist ?: artist,
+    description = other.description ?: description,
+    genre = other.genre?.let { other.getGenres() } ?: genre,
+    thumbnailUrl = other.thumbnail_url ?: thumbnailUrl,
+    status = other.status.toLong(),
+    updateStrategy = other.update_strategy,
+    initialized = other.initialized && initialized,
+)
 
-fun Manga.copyFrom(other: SManga): Manga {
-    val author = other.author ?: author
-    val artist = other.artist ?: artist
-    val description = other.description ?: description
-    val genres = if (other.genre != null) {
-        other.getGenres()
-    } else {
-        genre
-    }
-    val thumbnailUrl = other.thumbnail_url ?: thumbnailUrl
-    return this.copy(
-        author = author,
-        artist = artist,
-        description = description,
-        genre = genres,
-        thumbnailUrl = thumbnailUrl,
-        status = other.status.toLong(),
-        updateStrategy = other.update_strategy,
-        initialized = other.initialized && initialized,
-    )
-}
-
-fun Manga.hasCustomCover(coverCache: CoverCache = Injekt.get()): Boolean {
-    return coverCache.getCustomCoverFile(id).exists()
-}
-
-/**
- * Creates a ComicInfo instance based on the manga and chapter metadata.
- */
-fun getComicInfo(
+// ComicInfo creation with optimized logic
+fun createComicInfo(
     manga: Manga,
     chapter: Chapter,
     urls: List<String>,
-    categories: List<String>?,
+    categories: List<String>? = null,
     sourceName: String,
-) = ComicInfo(
+): ComicInfo = ComicInfo(
     title = ComicInfo.Title(chapter.name),
     series = ComicInfo.Series(manga.title),
-    number = chapter.chapterNumber.takeIf { it >= 0 }?.let {
-        if ((it.rem(1) == 0.0)) {
-            ComicInfo.Number(it.toInt().toString())
-        } else {
-            ComicInfo.Number(it.toString())
-        }
-    },
+    number = chapter.chapterNumber.takeIf { it >= 0 }?.let(::formatChapterNumber),
     web = ComicInfo.Web(urls.joinToString(" ")),
-    summary = manga.description?.let { ComicInfo.Summary(it) },
-    writer = manga.author?.let { ComicInfo.Writer(it) },
-    penciller = manga.artist?.let { ComicInfo.Penciller(it) },
-    translator = chapter.scanlator?.let { ComicInfo.Translator(it) },
-    genre = manga.genre?.let { ComicInfo.Genre(it.joinToString()) },
+    summary = manga.description?.let(ComicInfo::Summary),
+    writer = manga.author?.let(ComicInfo::Writer),
+    penciller = manga.artist?.let(ComicInfo::Penciller),
+    translator = chapter.scanlator?.let(ComicInfo::Translator),
+    genre = manga.genre?.joinToString()?.let(ComicInfo::Genre),
     publishingStatus = ComicInfo.PublishingStatusTachiyomi(
-        ComicInfoPublishingStatus.toComicInfoValue(manga.status),
+        ComicInfoPublishingStatus.toComicInfoValue(manga.status)
     ),
-    categories = categories?.let { ComicInfo.CategoriesTachiyomi(it.joinToString()) },
+    categories = categories?.joinToString()?.let(ComicInfo::CategoriesTachiyomi),
     source = ComicInfo.SourceMihon(sourceName),
     inker = null,
     colorist = null,
@@ -109,3 +94,11 @@ fun getComicInfo(
     coverArtist = null,
     tags = null,
 )
+
+// Helper function for chapter number formatting
+private fun formatChapterNumber(number: Double): ComicInfo.Number = 
+    ComicInfo.Number(if (number.rem(1) == 0.0) number.toInt().toString() else number.toString())
+
+// Deprecated function for backward compatibility
+@Deprecated("Use hasActiveFilters property instead", ReplaceWith("hasActiveFilters"))
+fun Manga.chaptersFiltered(): Boolean = hasActiveFilters
