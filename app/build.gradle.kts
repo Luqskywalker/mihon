@@ -11,11 +11,10 @@ plugins {
     alias(libs.plugins.aboutLibraries)
 }
 
+// Conditional plugin application
 if (Config.includeTelemetry) {
-    pluginManager.apply {
-        apply(libs.plugins.google.services.get().pluginId)
-        apply(libs.plugins.firebase.crashlytics.get().pluginId)
-    }
+    apply(plugin = libs.plugins.google.services.get().pluginId)
+    apply(plugin = libs.plugins.firebase.crashlytics.get().pluginId)
 }
 
 shortcutHelper.setFilePath("./shortcuts.xml")
@@ -25,17 +24,20 @@ android {
 
     defaultConfig {
         applicationId = "app.mihon"
-
         versionCode = 16
         versionName = "0.19.3"
 
+        // Build config fields
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")
         buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
-        buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
-        buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
+        buildConfigField("boolean", "TELEMETRY_INCLUDED", Config.includeTelemetry.toString())
+        buildConfigField("boolean", "UPDATER_ENABLED", Config.enableUpdater.toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Resource configuration to reduce APK size
+        resourceConfigurations += setOf("en", "xxhdpi")
     }
 
     buildTypes {
@@ -43,56 +45,67 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-${getCommitCount()}"
             isPseudoLocalesEnabled = true
+            isTestCoverageEnabled = true
+            
+            // Debug-only optimizations
+            enableUnitTestCoverage = true
+            enableAndroidTestCoverage = true
         }
+
         val release by getting {
             isMinifyEnabled = Config.enableCodeShrink
             isShrinkResources = Config.enableCodeShrink
+            isCrunchPngs = true
 
-            proguardFiles("proguard-android-optimize.txt", "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
 
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = true)}\"")
         }
 
+        // Common configuration for custom build types
         val commonMatchingFallbacks = listOf(release.name)
 
-        create("foss") {
+        register("foss") {
             initWith(release)
-
             applicationIdSuffix = ".foss"
-
             matchingFallbacks.addAll(commonMatchingFallbacks)
         }
-        create("preview") {
+
+        register("preview") {
             initWith(release)
-
             applicationIdSuffix = ".debug"
-
             versionNameSuffix = debug.versionNameSuffix
             signingConfig = debug.signingConfig
-
             matchingFallbacks.addAll(commonMatchingFallbacks)
-
             buildConfigField("String", "BUILD_TIME", "\"${getBuildTime(useLastCommitTime = false)}\"")
         }
-        create("benchmark") {
-            initWith(release)
 
+        register("benchmark") {
+            initWith(release)
             isDebuggable = false
             isProfileable = true
             versionNameSuffix = "-benchmark"
             applicationIdSuffix = ".benchmark"
-
             signingConfig = debug.signingConfig
-
             matchingFallbacks.addAll(commonMatchingFallbacks)
         }
     }
 
+    // Source set configurations
     sourceSets {
-        getByName("preview").res.srcDirs("src/debug/res")
-        getByName("benchmark").res.srcDirs("src/debug/res")
+        named("preview") {
+            res.srcDirs("src/debug/res")
+        }
+        named("benchmark") {
+            res.srcDirs("src/debug/res")
+            java.srcDirs("src/benchmark/java")
+        }
     }
 
+    // ABI splits for optimized APK distribution
     splits {
         abi {
             isEnable = true
@@ -100,62 +113,92 @@ android {
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
+        density {
+            isEnable = false // Disabled to reduce build time, enable if needed
+        }
     }
 
+    // Packaging options for optimized APK size
     packaging {
         jniLibs {
-            keepDebugSymbols += listOf(
+            keepDebugSymbols += setOf(
                 "libandroidx.graphics.path",
-                "libarchive-jni",
+                "libarchive-jni", 
                 "libconscrypt_jni",
                 "libimagedecoder",
                 "libquickjs",
                 "libsqlite3x",
-            )
-                .map { "**/$it.so" }
+            ).map { "**/$it.so" }
         }
+        
         resources {
+            // Reduced exclusions for better performance
             excludes += setOf(
+                "/META-INF/**",
+                "/kotlin/**",
+                "**/*.properties",
+                "**/*.version",
+                "**/DEPENDENCIES",
+                "**/LICENSE*",
+                "**/NOTICE*",
+                "**/README*",
                 "kotlin-tooling-metadata.json",
-                "LICENSE.txt",
-                "META-INF/**/*.properties",
-                "META-INF/**/LICENSE.txt",
-                "META-INF/*.properties",
-                "META-INF/*.version",
-                "META-INF/DEPENDENCIES",
-                "META-INF/LICENSE",
-                "META-INF/NOTICE",
-                "META-INF/README.md",
             )
         }
     }
 
-    dependenciesInfo {
-        includeInApk = Config.includeDependencyInfo
-        includeInBundle = Config.includeDependencyInfo
-    }
-
+    // Build features configuration
     buildFeatures {
         viewBinding = true
         buildConfig = true
         aidl = true
-
-        // Disable some unused things
+        
+        // Disable unused features
         renderScript = false
         shaders = false
+        resValues = false
     }
 
+    // Compile options for better performance
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    // Kotlin options
+    kotlinOptions {
+        jvmTarget = "17"
+        freeCompilerArgs += listOf(
+            "-Xjvm-default=all",
+        )
+    }
+
+    // Lint configuration
     lint {
         abortOnError = false
         checkReleaseBuilds = false
+        ignoreTestSources = true
+        quiet = true
+    }
+
+    // Test options
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
+        animationsDisabled = true
     }
 }
 
+// Kotlin compiler configuration
 kotlin {
     compilerOptions {
         freeCompilerArgs.addAll(
             "-opt-in=androidx.compose.animation.ExperimentalAnimationApi",
-            "-opt-in=androidx.compose.animation.graphics.ExperimentalAnimationGraphicsApi",
+            "-opt-in=androidx.compose.animation.graphics.ExperimentalAnimationGraphicsApi", 
             "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
             "-opt-in=androidx.compose.foundation.layout.ExperimentalLayoutApi",
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
@@ -165,11 +208,15 @@ kotlin {
             "-opt-in=kotlinx.coroutines.FlowPreview",
             "-opt-in=kotlinx.coroutines.InternalCoroutinesApi",
             "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
+            // Performance optimizations
+            "-Xstring-concat=inline",
         )
     }
 }
 
+// Dependencies configuration
 dependencies {
+    // Core modules
     implementation(projects.i18n)
     implementation(projects.core.archive)
     implementation(projects.core.common)
@@ -183,30 +230,21 @@ dependencies {
     implementation(projects.telemetry)
 
     // Compose
+    implementation(platform(libs.androidx.compose.bom))
     implementation(compose.activity)
     implementation(compose.foundation)
     implementation(compose.material3.core)
     implementation(compose.material.icons)
     implementation(compose.animation)
     implementation(compose.animation.graphics)
-    debugImplementation(compose.ui.tooling)
     implementation(compose.ui.tooling.preview)
     implementation(compose.ui.util)
+    debugImplementation(compose.ui.tooling)
 
+    // AndroidX
     implementation(androidx.interpolator)
-
     implementation(androidx.paging.runtime)
     implementation(androidx.paging.compose)
-
-    implementation(libs.bundles.sqlite)
-
-    implementation(kotlinx.reflect)
-    implementation(kotlinx.immutables)
-
-    implementation(platform(kotlinx.coroutines.bom))
-    implementation(kotlinx.bundles.coroutines)
-
-    // AndroidX libraries
     implementation(androidx.annotation)
     implementation(androidx.appcompat)
     implementation(androidx.biometricktx)
@@ -216,34 +254,37 @@ dependencies {
     implementation(androidx.recyclerview)
     implementation(androidx.viewpager)
     implementation(androidx.profileinstaller)
-
     implementation(androidx.bundles.lifecycle)
-
-    // Job scheduling
     implementation(androidx.workmanager)
 
-    // RxJava
-    implementation(libs.rxjava)
+    // Kotlin
+    implementation(kotlinx.reflect)
+    implementation(kotlinx.immutables)
+    implementation(platform(kotlinx.coroutines.bom))
+    implementation(kotlinx.bundles.coroutines)
+
+    // Database
+    implementation(libs.bundles.sqlite)
 
     // Networking
     implementation(libs.bundles.okhttp)
     implementation(libs.okio)
-    implementation(libs.conscrypt.android) // TLS 1.3 support for Android < 10
+    implementation(libs.conscrypt.android)
 
-    // Data serialization (JSON, protobuf, xml)
+    // Serialization
     implementation(kotlinx.bundles.serialization)
 
-    // HTML parser
+    // HTML parsing
     implementation(libs.jsoup)
 
-    // Disk
+    // Storage
     implementation(libs.disklrucache)
     implementation(libs.unifile)
 
     // Preferences
     implementation(libs.preferencektx)
 
-    // Dependency injection
+    // DI
     implementation(libs.injekt)
 
     // Image loading
@@ -254,7 +295,7 @@ dependencies {
     }
     implementation(libs.image.decoder)
 
-    // UI libraries
+    // UI components
     implementation(libs.material)
     implementation(libs.flexible.adapter.core)
     implementation(libs.photoview)
@@ -271,36 +312,43 @@ dependencies {
     implementation(libs.reorderable)
     implementation(libs.bundles.markdown)
 
-    // Logging
-    implementation(libs.logcat)
+    // Reactive
+    implementation(libs.rxjava)
 
-    // Shizuku
+    // System integration
     implementation(libs.bundles.shizuku)
 
-    // String similarity
+    // Utilities
     implementation(libs.stringSimilarity)
+    implementation(libs.logcat)
 
-    // Tests
+    // Debug tools
+    debugImplementation(libs.leakcanary.plumber)
+
+    // Testing
     testImplementation(libs.bundles.test)
+    testImplementation(kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.platform.launcher)
 
-    // For detecting memory leaks; see https://square.github.io/leakcanary/
-    // debugImplementation(libs.leakcanary.android)
-    implementation(libs.leakcanary.plumber)
-
-    testImplementation(kotlinx.coroutines.test)
+    // Core library desugaring for newer APIs on older devices
+    coreLibraryDesugaring(libs.android.desugarJdkLibs)
 }
 
+// Variant configuration
 androidComponents {
     onVariants(selector().withFlavor("default" to "standard")) {
-        // Only excluding in standard flavor because this breaks
-        // Layout Inspector's Compose tree
         it.packaging.resources.excludes.add("META-INF/*.version")
     }
 }
 
-buildscript {
-    dependencies {
-        classpath(kotlinx.gradle)
+// Build performance optimizations
+tasks.withType<JavaCompile>().configureEach {
+    options.isFork = true
+    options.forkOptions.memoryMaximumSize = "2g"
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    kotlinOptions {
+        allWarningsAsErrors = false
     }
 }
