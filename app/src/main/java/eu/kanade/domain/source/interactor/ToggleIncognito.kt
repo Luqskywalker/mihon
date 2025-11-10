@@ -6,9 +6,22 @@ import tachiyomi.core.common.preference.getAndSet
 class ToggleIncognito(
     private val preferences: SourcePreferences,
 ) {
-    fun await(extensions: String, enable: Boolean) {
-        preferences.incognitoExtensions().getAndSet {
-            if (enable) it.plus(extensions) else it.minus(extensions)
+    
+    fun toggle(packageName: String) {
+        preferences.incognitoExtensions().getAndSet { extensions ->
+            if (packageName in extensions) extensions - packageName else extensions + packageName
         }
+    }
+
+    fun enable(packageName: String) {
+        preferences.incognitoExtensions().getAndSet { it + packageName }
+    }
+
+    fun disable(packageName: String) {
+        preferences.incognitoExtensions().getAndSet { it - packageName }
+    }
+
+    fun set(packageName: String, enabled: Boolean) {
+        if (enabled) enable(packageName) else disable(packageName)
     }
 }
