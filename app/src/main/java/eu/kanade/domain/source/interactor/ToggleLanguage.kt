@@ -4,13 +4,40 @@ import eu.kanade.domain.source.service.SourcePreferences
 import tachiyomi.core.common.preference.getAndSet
 
 class ToggleLanguage(
-    val preferences: SourcePreferences,
+    private val preferences: SourcePreferences,
 ) {
 
-    fun await(language: String) {
-        val isEnabled = language in preferences.enabledLanguages().get()
-        preferences.enabledLanguages().getAndSet { enabled ->
-            if (isEnabled) enabled.minus(language) else enabled.plus(language)
+    fun toggle(language: String) {
+        preferences.enabledLanguages().getAndSet { languages ->
+            if (language in languages) languages - language else languages + language
         }
+    }
+
+    fun enable(language: String) {
+        preferences.enabledLanguages().getAndSet { it + language }
+    }
+
+    fun enableAll(languages: Collection<String>) {
+        preferences.enabledLanguages().getAndSet { it + languages }
+    }
+
+    fun disable(language: String) {
+        preferences.enabledLanguages().getAndSet { it - language }
+    }
+
+    fun disableAll(languages: Collection<String>) {
+        preferences.enabledLanguages().getAndSet { it - languages }
+    }
+
+    fun set(language: String, enabled: Boolean) {
+        if (enabled) enable(language) else disable(language)
+    }
+
+    fun setAll(languages: Collection<String>, enabled: Boolean) {
+        if (enabled) enableAll(languages) else disableAll(languages)
+    }
+
+    fun clear() {
+        preferences.enabledLanguages().delete()
     }
 }
