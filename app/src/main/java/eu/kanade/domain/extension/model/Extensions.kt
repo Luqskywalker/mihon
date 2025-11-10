@@ -7,4 +7,8 @@ data class Extensions(
     val installed: List<Extension.Installed>,
     val available: List<Extension.Available>,
     val untrusted: List<Extension.Untrusted>,
-)
+) {
+    val hasUpdates get() = updates.isNotEmpty()
+    val totalCount get() = updates.size + installed.size + available.size + untrusted.size
+    val isEmpty get() = totalCount == 0
+}
