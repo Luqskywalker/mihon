@@ -6,11 +6,11 @@ import androidx.core.graphics.drawable.toBitmap
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import tachiyomi.domain.source.model.Source
 import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
+
+private val extensionManager: ExtensionManager by lazy { Injekt.get() }
 
 val Source.icon: ImageBitmap?
-    get() {
-        return Injekt.get<ExtensionManager>().getAppIconForSource(id)
-            ?.toBitmap()
-            ?.asImageBitmap()
-    }
+    get() = extensionManager
+        .getAppIconForSource(id)
+        ?.toBitmap()
+        ?.asImageBitmap()
