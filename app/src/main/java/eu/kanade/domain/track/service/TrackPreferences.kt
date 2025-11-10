@@ -12,18 +12,18 @@ class TrackPreferences(
 ) {
 
     fun trackUsername(tracker: Tracker) = preferenceStore.getString(
-        Preference.privateKey("pref_mangasync_username_${tracker.id}"),
-        "",
+        key = "track_username_${tracker.id}",
+        defaultValue = "",
     )
 
     fun trackPassword(tracker: Tracker) = preferenceStore.getString(
-        Preference.privateKey("pref_mangasync_password_${tracker.id}"),
-        "",
+        key = "track_password_${tracker.id}",
+        defaultValue = "",
     )
 
     fun trackAuthExpired(tracker: Tracker) = preferenceStore.getBoolean(
-        Preference.privateKey("pref_tracker_auth_expired_${tracker.id}"),
-        false,
+        key = "track_auth_expired_${tracker.id}",
+        defaultValue = false,
     )
 
     fun setCredentials(tracker: Tracker, username: String, password: String) {
@@ -32,14 +32,33 @@ class TrackPreferences(
         trackAuthExpired(tracker).set(false)
     }
 
-    fun trackToken(tracker: Tracker) = preferenceStore.getString(Preference.privateKey("track_token_${tracker.id}"), "")
+    fun clearCredentials(tracker: Tracker) {
+        trackUsername(tracker).delete()
+        trackPassword(tracker).delete()
+        trackAuthExpired(tracker).delete()
+        trackToken(tracker).delete()
+    }
 
-    fun anilistScoreType() = preferenceStore.getString("anilist_score_type", Anilist.POINT_10)
+    fun trackToken(tracker: Tracker) = preferenceStore.getString(
+        key = "track_token_${tracker.id}",
+        defaultValue = "",
+    )
 
-    fun autoUpdateTrack() = preferenceStore.getBoolean("pref_auto_update_manga_sync_key", true)
+    fun anilistScoreType() = preferenceStore.getString(
+        key = "anilist_score_type",
+        defaultValue = Anilist.POINT_10,
+    )
+
+    fun autoUpdateTrack() = preferenceStore.getBoolean(
+        key = "auto_update_track",
+        defaultValue = true,
+    )
 
     fun autoUpdateTrackOnMarkRead() = preferenceStore.getEnum(
-        "pref_auto_update_manga_on_mark_read",
-        AutoTrackState.ALWAYS,
+        key = "auto_update_track_on_mark_read",
+        defaultValue = AutoTrackState.ALWAYS,
     )
+
+    fun isLoggedIn(tracker: Tracker): Boolean = trackToken(tracker).get().isNotEmpty() ||
+        (trackUsername(tracker).get().isNotEmpty() && trackPassword(tracker).get().isNotEmpty())
 }
