@@ -6,30 +6,28 @@ import eu.kanade.tachiyomi.extension.ExtensionManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 class GetIncognitoState(
     private val basePreferences: BasePreferences,
     private val sourcePreferences: SourcePreferences,
     private val extensionManager: ExtensionManager,
 ) {
-    fun await(sourceId: Long?): Boolean {
-        if (basePreferences.incognitoMode().get()) return true
-        if (sourceId == null) return false
-        val extensionPackage = extensionManager.getExtensionPackage(sourceId) ?: return false
 
-        return extensionPackage in sourcePreferences.incognitoExtensions().get()
+    fun await(sourceId: Long?): Boolean = when {
+        basePreferences.incognitoMode().get() -> true
+        sourceId == null -> false
+        else -> extensionManager.getExtensionPackage(sourceId) in sourcePreferences.incognitoExtensions().get()
     }
 
-    fun subscribe(sourceId: Long?): Flow<Boolean> {
-        if (sourceId == null) return basePreferences.incognitoMode().changes()
-
-        return combine(
+    fun subscribe(sourceId: Long?): Flow<Boolean> = when (sourceId) {
+        null -> basePreferences.incognitoMode().changes()
+        else -> combine(
             basePreferences.incognitoMode().changes(),
             sourcePreferences.incognitoExtensions().changes(),
             extensionManager.getExtensionPackageAsFlow(sourceId),
-        ) { incognito, incognitoExtensions, extensionPackage ->
-            incognito || (extensionPackage in incognitoExtensions)
-        }
-            .distinctUntilChanged()
+        ) { incognito, extensions, pkg ->
+            incognito || pkg in extensions
+        }.distinctUntilChanged()
     }
 }
